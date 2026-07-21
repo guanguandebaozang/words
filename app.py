@@ -1,4 +1,6 @@
+import streamlit
 import streamlit as st
+from streamlit_image_coordinates import streamlit_image_coordinates
 from PIL import Image, ImageDraw
 import json
 import hashlib
@@ -9,7 +11,6 @@ import os
 
 # 持久化文件
 DATA_FILE = "data_backup.json"
-
 # 页面全局配置
 st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
 
@@ -69,7 +70,7 @@ def save_all_data(pool):
             "hotspots": item["hotspots"]
         }
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(dump_data, f, ensure_ascii=False, indent=2)
+        json.dump(dump_data, ensure_ascii=False, indent=2)
 
 def load_all_data():
     if not os.path.exists(DATA_FILE):
@@ -108,6 +109,9 @@ def init_session():
         st.session_state.temp_x2 = 220
     if "temp_y2" not in st.session_state:
         st.session_state.temp_y2 = 150
+    # 坐标拾取缓存
+    if "pick_first" not in st.session_state:
+        st.session_state.pick_first = None
 init_session()
 
 # 页面标题
@@ -124,7 +128,7 @@ if img_name_list:
     selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张）", img_name_list)
     st.session_state.current_img_name = selected_img
 
-# ========== 学生页面 ==========
+# ========== 学生页面（已移除所有红框绘制，只展示原图） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
     st.info("仅浏览单词、浏览器语音朗读")
@@ -136,14 +140,8 @@ if st.session_state.view_mode == "visit":
         origin_img = current_data["img"]
         hotspot_list = current_data["hotspots"]
 
-        canvas = origin_img.copy()
-        draw = ImageDraw.Draw(canvas)
-        for item in hotspot_list:
-            bx1, by1, bx2, by2 = item["box"]
-            if bx1 < bx2 and by1 < by2:
-                draw.rectangle([bx1, by1, bx2, by2], outline="#ff0000", width=6)
-
-        st.image(canvas, caption="红色粗框=单词学习热点", use_column_width=True)
+        # 学生端：直接使用原图，不绘制任何红色热点框
+        st.image(origin_img, caption="校园全景", use_column_width=True)
 
         if len(hotspot_list) == 0:
             st.warning("暂无校园英语词汇")
@@ -178,7 +176,7 @@ if st.session_state.view_mode == "visit":
             with b2:
                 st.button("🔊 朗读例句", on_click=lambda: st.components.v1.html("<script>readSentence()</script>", height=0))
 
-# ========== 管理员后台 ==========
+# ========== 管理员后台（正常显示粗细红框+鼠标拾取坐标） ==========
 else:
     if not st.session_state.is_admin:
         st.subheader("🔐 管理员登录验证")
@@ -252,12 +250,11 @@ else:
         temp_x2 = st.session_state.temp_x2
         temp_y2 = st.session_state.temp_y2
         valid_temp_box = False
-
         if len(img_name_list) == 0:
             st.info("请先上传图片")
         else:
             current_data = st.session_state.image_pool[selected_img]
-            w, h = current_data["img"].size
+            w, h = current_data["img"]
             c1, c2 = st.columns(2)
             with c1:
                 st.session_state.temp_x1 = st.number_input("左上角 X", min_value=0, max_value=w, value=temp_x1, key="tx1")
@@ -287,7 +284,6 @@ else:
             save_btn = st.button("✅ 保存热点")
             clear_all_btn = st.button("🗑️ 清空本图热点")
             del_img_btn = st.button("🗑️ 删除当前图片")
-
             if save_btn:
                 if not eng_word or not cn_mean:
                     st.warning("英文/释义不能为空")
@@ -309,7 +305,7 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 预览绘图
+    # 管理员预览绘图（保留粗红已保存框+浅红预览框+鼠标拾取）
     if img_name_list and selected_img:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -333,7 +329,34 @@ else:
 
         img_col, opt_col = st.columns([3,1])
         with img_col:
-            st.image(canvas, caption="粗红=已保存 | 浅红=实时预览", use_column_width=True)
+            # 鼠标坐标拾取
+            value = streamlit_image_coordinates(
+                canvas,
+                key="coord_picker",
+                use_column_width=True
+            )
+            st.caption("粗红=已保存 | 浅红=实时预览｜点击两点框选区域")
+            # 拾取逻辑
+            if value is not None:
+                x_click = round(value["x"])
+                y_click = round(value["y"])
+                if st.session_state.pick_first is None:
+                    st.session_state.pick_first = (x_click, y_click)
+                    st.info(f"已拾取左上：{x_click}, {y_click}，再次点击选取右下角")
+                else:
+                    x1, y1 = st.session_state.pick_first
+                    x2, y2 = x_click, y_click
+                    st.session_state.temp_x1 = min(x1, x2)
+                    st.session_state.temp_y1 = min(y1, y2)
+                    st.session_state.temp_x2 = max(x1, x2)
+                    st.session_state.temp_y2 = max(y1, y2)
+                    st.session_state.pick_first = None
+                    st.rerun()
+            # 重置拾取按钮
+            if st.button("🔄 重置坐标拾取"):
+                st.session_state.pick_first = None
+                st.rerun()
+
         with opt_col:
             st.subheader("热点管理")
             if len(hotspot_list) > 0:
@@ -353,7 +376,6 @@ else:
         export_data[name] = {"hotspots": data["hotspots"]}
     json_dump = json.dumps(export_data, ensure_ascii=False, indent=2)
     st.download_button("💾 导出全部热点JSON", data=json_dump, file_name="all_hotspots_backup.json")
-
     json_upload = st.file_uploader("📂 导入备份JSON", type="json", key="json_upload_fix")
     if json_upload:
         load_data = json.load(json_upload)
