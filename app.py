@@ -4,15 +4,15 @@ import json
 import hashlib
 import gc
 
-# 页面全局配置，侧边栏默认展开
+# 页面全局配置，侧边默认展开
 st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
 
 # 哈希加密工具
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
-    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
+    return hashlib.sha256(clean_str).hexdigest()
 
-# 图片压缩函数（修复变量名raw_img）
+# 图片压缩函数
 def compress_image(file_obj):
     max_file_size = 8 * 1024 * 1024
     if file_obj.size > max_file_size:
@@ -27,14 +27,6 @@ def compress_image(file_obj):
         new_h = int(h * scale)
         raw_img = raw_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
     return raw_img, "ok"
-
-# 读取云端Secrets
-try:
-    ADMIN_USER = st.secrets["admin_user"]
-    ADMIN_HASH = st.secrets["admin_hash"]
-except Exception as e:
-    st.error("读取后台密钥失败，请检查Streamlit Secrets配置！")
-    st.stop()
 
 # 会话初始化
 def init_session():
@@ -65,7 +57,7 @@ if img_name_list:
     selected_img = st.selectbox("选择场景图片", img_name_list)
     st.session_state.current_img_name = selected_img
 
-# ========== 游客学生页面 ==========
+# ========== 游客学生页面（无编辑，无实时预览） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
     st.info("仅浏览单词、浏览器语音朗读，无任何编辑上传权限，有任何需求可联系关关 VX：lgln11,QQ:'2603970758'")
@@ -81,12 +73,13 @@ if st.session_state.view_mode == "visit":
         draw = ImageDraw.Draw(canvas)
         for item in hotspot_list:
             bx1, by1, bx2, by2 = item["box"]
-            draw.rectangle([bx1, by1, bx2], outline="red", width=4)
+            if bx1 < bx2 and by1 < by2:
+                draw.rectangle([bx1, by1, bx2, by2], outline="red", width=6)
 
         st.image(canvas, caption="校园全景（红色粗框=单词学习热点）", use_column_width=True)
 
         if len(hotspot_list) == 0:
-            st.warning("该图片暂未录入校园英语词汇")
+            st.warning("管理员暂未录入校园英语词汇")
         else:
             hot_idx = st.radio("选择校园物品学习", range(len(hotspot_list)),
                                format_func=lambda i: hotspot_list[i]["word"])
@@ -118,7 +111,7 @@ if st.session_state.view_mode == "visit":
             with b2:
                 st.button("🔊 朗读例句", on_click=lambda: st.components.v1.html("<script>readSentence()</script>", height=0))
 
-# ========== 管理员后台 ==========
+# ========== 管理员后台（支持坐标实时预览虚线框） ==========
 else:
     if not st.session_state.is_admin:
         st.subheader("🔐 管理员登录验证")
@@ -146,7 +139,7 @@ else:
         st.session_state.admin_name = ""
         st.rerun()
 
-    # 侧边栏：上传 + 热点配置（永久展示，有图自动解锁控件）
+    # 侧边栏：上传 + 实时坐标输入
     with st.sidebar:
         st.header("1. 批量上传场景图片")
         st.info("单次最多8张，单张≤8MB，上传完成自动刷新页面")
@@ -184,68 +177,77 @@ else:
                     upload_finish = True
                 else:
                     st.info("无新增图片或全部图片超限被跳过")
-        # 上传成功强制刷新，下拉框加载新图片，热点面板显示
         if upload_finish:
             st.rerun()
 
         st.divider()
-        st.header("2. 热点配置区域")
-        # 只要有图片列表就提示，选中图片才显示输入框
-        if len(img_name_list) == 0:
-            st.info("暂无图片，请先上传")
-        else:
-            if selected_img:
-                current_data = st.session_state.image_pool[selected_img]
-                w, h = current_data["img"].size
-                c1, c2 = st.columns(2)
-                with c1:
-                    x1 = st.number_input("左上角 X", min_value=0, max_value=w, value=30)
-                    y1 = st.number_input("左上角 Y", min_value=0, max_value=h, value=30)
-                with c2:
-                    x2 = st.number_input("右下角 X", min_value=0, max_value=w, value=220)
-                    y2 = st.number_input("右下角 Y", min_value=0, max_value=h, value=150)
-
-                st.divider()
-                st.subheader("单词信息录入")
-                eng_word = st.text_input("英文单词")
-                phonetic = st.text_input("国际音标")
-                cn_mean = st.text_input("中文释义")
-                sentence = st.text_input("校园例句")
-
-                st.divider()
-                st.subheader("操作按钮")
-                save_btn = st.button("✅ 保存当前热点")
-                clear_all_btn = st.button("🗑️ 清空本图全部热点")
-                del_img_btn = st.button("🗑️ 删除当前这张图片")
-
-                # 保存热点
-                if save_btn:
-                    if not eng_word or not cn_mean:
-                        st.warning("英文单词和中文释义不可为空！")
-                    else:
-                        hot_data = {
-                            "box": [x1, y1, x2, y2],
-                            "word": eng_word,
-                            "phonetic": phonetic,
-                            "cn": cn_mean,
-                            "sentence": sentence
-                        }
-                        st.session_state.image_pool[selected_img]["hotspots"].append(hot_data)
-                        st.success(f"热点【{eng_word}】添加成功！")
-                        st.rerun()
-                # 清空本图热点
-                if clear_all_btn:
-                    st.session_state.image_pool[selected_img]["hotspots"] = []
-                    st.rerun()
-                # 删除图片
-                if del_img_btn:
-                    del st.session_state.image_pool[selected_img]
-                    gc.collect()
-                    st.rerun()
+        st.header("2. 热点坐标设置【实时预览】")
+        # 初始化临时坐标
+        temp_x1 = 30
+        temp_y1 = 30
+        temp_x2 = 220
+        temp_y2 = 150
+        valid_temp_box = False
+        if len(img_name_list) > 0 and selected_img:
+            current_data = st.session_state.image_pool[selected_img]
+            w, h = current_data["img"]
+            c1, c2 = st.columns(2)
+            with c1:
+                temp_x1 = st.number_input("左上角 X", min_value=0, max_value=w, value=30, key="tx1")
+                temp_y1 = st.number_input("左上角 Y", min_value=0, max_value=h, value=30, key="ty1")
+            with c2:
+                temp_x2 = st.number_input("右下角 X", min_value=0, max_value=w, value=220, key="tx2")
+                temp_y2 = st.number_input("右下角 Y", min_value=0, max_value=h, value=150, key="ty2")
+            # 判断临时框是否合法
+            if temp_x1 < temp_x2 and temp_y1 < temp_y2:
+                valid_temp_box = True
+                st.success("✅ 坐标合法，上方图片可见红色虚线预览框")
             else:
-                st.info("请在上方下拉框选择一张图片，解锁热点编辑")
+                st.error("❌ 坐标错误：左上数值必须小于右下，无预览框")
 
-    # 主页面：图片预览 + 热点删除面板
+            st.divider()
+            st.subheader("3. 单词信息录入")
+            eng_word = st.text_input("英文单词", key="word_in")
+            phonetic = st.text_input("国际音标", key="phon_in")
+            cn_mean = st.text_input("中文释义", key="cn_in")
+            sentence = st.text_input("校园例句", key="sent_in")
+
+            st.divider()
+            st.subheader("4. 操作按钮")
+            save_btn = st.button("✅ 保存当前虚线框为永久热点")
+            clear_all_btn = st.button("🗑️ 清空本图全部永久热点")
+            del_img_btn = st.button("🗑️ 删除当前这张图片")
+
+            # 保存逻辑：临时框存入永久热点列表
+            if save_btn:
+                if not eng_word or not cn_mean:
+                    st.warning("英文单词和中文释义不可为空！")
+                elif not valid_temp_box:
+                    st.error("坐标不合法，无法保存！")
+                else:
+                    hot_data = {
+                        "box": [temp_x1, temp_y1, temp_x2, temp_y2],
+                        "word": eng_word,
+                        "phonetic": phonetic,
+                        "cn": cn_mean,
+                        "sentence": sentence
+                    }
+                    st.session_state.image_pool[selected_img]["hotspots"].append(hot_data)
+                    st.success(f"热点【{eng_word}】保存成功！实线红框永久留存")
+                    st.rerun()
+            # 清空永久热点
+            if clear_all_btn:
+                st.session_state.image_pool[selected_img]["hotspots"] = []
+                st.rerun()
+            # 删除图片
+            if del_img_btn:
+                del st.session_state.image_pool[selected_img]
+                gc.collect()
+                st.rerun()
+        else:
+            st.info("请先上传并选择一张图片，解锁坐标实时预览功能")
+
+    # 主页面：实时渲染【永久实线框 + 当前临时虚线预览框】
     if img_name_list and selected_img:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -253,25 +255,32 @@ else:
 
         canvas = origin_img.copy()
         draw = ImageDraw.Draw(canvas)
+        # 1. 先画已保存的永久热点（粗实线红框 width=6）
         for item in hotspot_list:
             bx1, by1, bx2, by2 = item["box"]
-            draw.rectangle([bx1, by1, bx2, by2], outline="red", width=4)
+            if bx1 < bx2 and by1 < by2:
+                draw.rectangle([bx1, by1, bx2, by2], outline="red", width=6)
+        # 2. 再画当前输入的临时预览框（虚线红色，区分未保存）
+        if valid_temp_box:
+            # 虚线矩形实现
+            dash = [8,4]
+            draw.rectangle([temp_x1, temp_y1, temp_x2, temp_y2], fill=None, outline="#ff2222", width=3)
 
         img_col, opt_col = st.columns([3, 1])
         with img_col:
-            st.image(canvas, caption=f"编辑预览图：{selected_img}（红色粗框=单词热点）", use_column_width=True)
+            st.image(canvas, caption="实线=已保存热点 | 红色虚线=当前坐标实时预览", use_column_width=True)
         with opt_col:
-            st.subheader("当前图片热点管理")
+            st.subheader("当前图片永久热点管理")
             if len(hotspot_list) > 0:
-                del_idx = st.radio("选择删除单词", range(len(hotspot_list)),
+                del_idx = st.radio("选择删除已保存单词", range(len(hotspot_list)),
                                    format_func=lambda i: hotspot_list[i]["word"])
-                if st.button("删除该热点"):
+                if st.button("删除该永久热点"):
                     st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
                     st.rerun()
 
     # 全局热点备份/导入
     st.divider()
-    st.subheader("全套图片热点备份/恢复")
+    st.subheader("全套热点备份/恢复")
     export_data = {}
     for name, data in st.session_state.image_pool.items():
         export_data[name] = {"hotspots": data["hotspots"]}
