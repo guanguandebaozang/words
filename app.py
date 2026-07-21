@@ -27,7 +27,7 @@ def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# PIL图片转纯base64（先不销毁图片对象）
+# PIL图片转纯base64
 def img_to_b64(pil_img):
     if pil_img is None:
         return None
@@ -75,7 +75,7 @@ def load_and_compress(file_obj):
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
 
-# 安全持久化（全局捕获异常，不阻断上传逻辑）
+# 【修复】安全持久化，完整捕获文件+json异常
 def save_all_data(pool):
     try:
         dump_data = {}
@@ -87,8 +87,10 @@ def save_all_data(pool):
                 "img_b64": b64_str,
                 "hotspots": item["hotspots"]
             }
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(dump_data, ensure_ascii=False, indent=2)
+        # 分开定义文件句柄，杜绝参数缺失
+        f = open(DATA_FILE, "w", encoding="utf-8")
+        json.dump(dump_data, f, ensure_ascii=False, indent=2)
+        f.close()
         return True
     except Exception as err:
         st.error(f"本地保存异常：{str(err)}，内存图片保留，可正常编辑")
@@ -240,7 +242,7 @@ else:
                     if img is None:
                         fail_list.append(msg)
                         continue
-                    # 核心逻辑：同名只替换图片，保留原有热点
+                    # 同名只替换图片，保留热点
                     if file.name in st.session_state.image_pool:
                         st.session_state.image_pool[file.name]["img"] = img
                         st.info(f"{file.name}：已更新图片，原有热点保留")
@@ -319,7 +321,7 @@ else:
         tx1,ty1,tx2,ty2 = st.session_state.temp_x1, st.session_state.temp_y1, st.session_state.temp_x2, st.session_state.temp_y2
         valid_temp_box = tx1 < tx2 and ty1 < ty2
         canvas = origin_img.copy()
-        draw = ImageDraw(canvas)
+        draw = ImageDraw.Draw(canvas)
         # 已保存粗红框
         for item in hotspot_list:
             bx1,by1,bx2,by2 = item["box"]
@@ -348,7 +350,6 @@ else:
                     st.rerun()
             if st.button("🔄 重置坐标拾取"):
                 st.session_state.pick_first = None
-                st.rerun()
         with opt_col:
             st.subheader("热点管理")
             if len(hotspot_list) > 0:
