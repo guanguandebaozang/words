@@ -5,24 +5,16 @@ import hashlib
 
 st.set_page_config(page_title="🏫校园场景点读学英语", layout="wide")
 
-# 工具：逐层转换Secrets为标准字典（剥离只读对象）
-def secret_to_dict(raw_obj):
-    if hasattr(raw_obj, "items"):
-        new_d = {}
-        for k, v in raw_obj.items():
-            new_d[k] = secret_to_dict(v)
-        return new_d
-    return raw_obj
+# SHA256加密函数，自动去除输入首尾空格
+def get_pwd_hash(raw_str):
+    clean_str = raw_str.strip()
+    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# 读取云端secrets（满足必须读取secret需求）
-raw_creds = st.secrets["credentials"]
-creds = secret_to_dict(raw_creds)
+# 【关键：直接读取独立secrets字符串，不嵌套字典】
+ADMIN_USER = st.secrets["admin_user"]
+ADMIN_HASH = st.secrets["admin_hash"]
 
-# SHA256密码加密工具
-def get_pwd_hash(plain_pwd):
-    return hashlib.sha256(plain_pwd.encode("utf-8")).hexdigest()
-
-# 会话状态初始化
+# 会话初始化
 if "bg_img" not in st.session_state:
     st.session_state.bg_img = None
 if "draw_canvas" not in st.session_state:
@@ -44,10 +36,10 @@ with col_switch1:
     page_choose = st.radio("页面入口", ["学生学习页", "管理员后台"])
 st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "admin"
 
-# ===================== 游客学生页面（完全免登录，外网直接访问） =====================
+# ========== 游客学生页面（完全免登录，外网直接访问） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
-    st.info("仅浏览图片单词、浏览器语音朗读，无任何编辑上传权限")
+    st.info("仅浏览单词、浏览器语音朗读，无任何编辑上传权限")
 
     if st.session_state.bg_img is None:
         st.warning("管理员尚未上传校园场景图片与单词热点，请稍后再来！")
@@ -65,7 +57,7 @@ if st.session_state.view_mode == "visit":
             st.markdown(f"中文释义：{word_info['cn']}")
             st.markdown(f"校园例句：{word_info['sentence']}")
 
-            # 前端Web Speech朗读JS（云端手机/电脑通用）
+            # 前端Web Speech朗读JS
             speak_js = f"""
             <script>
                 function readWord() {{
@@ -87,30 +79,29 @@ if st.session_state.view_mode == "visit":
             with b2:
                 st.button("🔊 朗读例句", on_click=lambda: st.components.v1.html("<script>readSentence()</script>", height=0))
 
-# ===================== 管理员后台（仅切换才显示登录框） =====================
+# ========== 管理员后台（仅切换才显示登录框） ==========
 else:
     if not st.session_state.is_admin:
         st.subheader("🔐 管理员登录验证")
         with st.form("login_form"):
-            username = st.text_input("用户名")
-            password = st.text_input("密码", type="password")
-            submit = st.form_submit_button("登录")
-            if submit:
-                user_info = creds["usernames"].get(username)
-                if not user_info:
-                    st.error("用户名不存在")
+            username_input = st.text_input("用户名")
+            password_input = st.text_input("密码", type="password")
+            submit_btn = st.form_submit_button("登录")
+            if submit_btn:
+                # 自动清理空格再比对
+                input_user = username_input.strip()
+                input_hash = get_pwd_hash(password_input)
+                if input_user != ADMIN_USER:
+                    st.error("用户名不正确")
+                elif input_hash == ADMIN_HASH:
+                    st.session_state.is_admin = True
+                    st.session_state.admin_name = "校园管理员"
+                    st.rerun()
                 else:
-                    # SHA256比对，无bcrypt salt异常
-                    input_hash = get_pwd_hash(password)
-                    if input_hash == user_info["password"]:
-                        st.session_state.is_admin = True
-                        st.session_state.admin_name = user_info["name"]
-                        st.rerun()
-                    else:
-                        st.error("密码错误，请核对")
+                    st.error("密码错误，请重新输入（注意不要带空格）")
         st.stop()
 
-    # 登录成功后编辑后台
+    # 登录成功编辑后台
     st.subheader("🔐 管理员单词配置后台")
     st.success(f"欢迎管理员 {st.session_state.admin_name}")
     if st.button("退出登录"):
@@ -173,7 +164,7 @@ else:
             st.session_state.draw_canvas = st.session_state.bg_img.copy()
         st.rerun()
 
-    # 图片预览 + 热点删除面板
+    # 图片预览 + 删除面板
     img_col, opt_col = st.columns([3, 1])
     with img_col:
         if st.session_state.draw_canvas:
@@ -193,7 +184,7 @@ else:
                     draw.rectangle(item["box"], outline="red", width=3)
                 st.rerun()
 
-    # 单词配置导入导出（云端务必备份）
+    # 单词配置导入导出
     st.divider()
     st.subheader("单词库保存/导入")
     if len(st.session_state.hotspot_list) > 0:
@@ -206,12 +197,12 @@ else:
         if st.session_state.bg_img:
             st.session_state.draw_canvas = st.session_state.bg_img.copy()
             draw = ImageDraw.Draw(st.session_state.draw_canvas)
-            for item in st.session_state.hotspot_list:
+            for item in st.session_state.draw_canvas:
                 draw.rectangle(item["box"], outline="red", width=3)
-        st.success("单词配置导入完成，切换学生页即可分享学习")
+        st.success("单词配置导入完成！切换学生页即可分享学习")
 
 # 校园高频词汇模板
-with st.expander("📚 校园英语词汇模板（管理员直接复制）"):
+with st.expander("📚 校园英语词汇模板（管理员复制）"):
     st.markdown("""
 1. classroom /ˈklɑːsruːm/ 教室 We have English in this classroom.
 2. playground /ˈpleɪɡraʊnd/ 操场 Students run on the playground.
@@ -223,6 +214,4 @@ with st.expander("📚 校园英语词汇模板（管理员直接复制）"):
 8. tree /triː/ 大树
 9. bench /bentʃ/ 长椅
 10. school bus 校车
-11. garden /ˈɡɑːdn/ 花坛
-12. office /ˈɒfɪs/ 教师办公室
 """)
