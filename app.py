@@ -4,7 +4,7 @@ import json
 import hashlib
 import gc
 
-# 页面全局配置，限制上传大小
+# 页面全局配置
 st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide")
 
 # 哈希加密工具
@@ -12,7 +12,7 @@ def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# 图片压缩+大小校验，单图限制8MB，最长边1200
+# 图片压缩+大小校验，修复变量名错误
 def compress_image(file_obj):
     max_file_size = 8 * 1024 * 1024
     if file_obj.size > max_file_size:
@@ -25,7 +25,7 @@ def compress_image(file_obj):
         scale = max_long_edge / long_edge
         new_w = int(w * scale)
         new_h = int(h * scale)
-        raw_img = raw.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        raw_img = raw_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
     return raw_img, "ok"
 
 # 读取云端Secrets
@@ -149,15 +149,13 @@ else:
     # 侧边编辑区
     with st.sidebar:
         st.header("1. 批量上传场景图片")
-        st.info("单次最多8张，单张≤8MB，大图自动压缩，上传完成点上方下拉框刷新")
-        # 添加唯一key，避免组件冲突卡死
+        st.info("单次最多8张，单张≤8MB，大图自动压缩，上传完成切换下拉框查看")
         upload_imgs = st.file_uploader(
             "支持jpg/png/jpeg，可多选",
             type=["jpg", "png", "jpeg"],
             accept_multiple_files=True,
             key="img_upload_key_fix"
         )
-        upload_success = False
         if upload_imgs:
             if len(upload_imgs) > 8:
                 st.error("单次最多上传8张图片，请分批次上传！")
@@ -181,15 +179,14 @@ else:
                         gc.collect()
                 progress_bar.empty()
                 if success_count > 0:
-                    st.success(f"成功上传{success_count}张！请切换上方下拉框查看图片")
-                    upload_success = True
+                    st.success(f"成功上传{success_count}张！切换上方下拉框查看图片")
                 else:
                     st.info("无新增图片或全部图片超限被跳过")
 
         st.divider()
         if img_name_list and selected_img:
             current_data = st.session_state.image_pool[selected_img]
-            w, h = current_data["img"].size
+            w, h = current_data["img"]
             st.header("2. 热点坐标设置（X1<X2，Y1<Y2）")
             c1, c2 = st.columns(2)
             with c1:
@@ -238,7 +235,7 @@ else:
         else:
             st.info("请先上传图片再配置热点")
 
-    # 主区域图片预览（上传后切换下拉框即可刷新，不阻塞上传流程）
+    # 主区域图片预览 + 热点删除面板
     if img_name_list and selected_img:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
