@@ -14,9 +14,10 @@ DATA_FILE = "data_backup.json"
 # 页面全局配置
 st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
 
-# ========= Secrets安全读取 =========
+# ========= 登录配置（修复正确哈希，账号admin 密码school2026） =========
 ADMIN_USER = "admin"
-ADMIN_HASH = "6261f86b819e46d4027239f8c6d72505078f824137a40842d8d37711718d5461"
+# school2026 正确sha256
+ADMIN_HASH = "5cee8df435262631ed30289e56c6ccb661f1628b24e107533146894471d49de5"
 try:
     ADMIN_USER = st.secrets["admin_user"]
     ADMIN_HASH = st.secrets["admin_hash"]
@@ -25,7 +26,7 @@ except Exception:
 
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
-    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest
+    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
 # PIL图片转纯base64
 def img_to_b64(pil_img):
@@ -75,7 +76,7 @@ def load_and_compress(file_obj):
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
 
-# 【修复】标准with open，消除fp缺失报错
+# 【彻底修复dump fp报错】标准with上下文写入
 def save_all_data(pool):
     try:
         dump_data = {}
@@ -87,9 +88,9 @@ def save_all_data(pool):
                 "img_b64": b64_str,
                 "hotspots": item["hotspots"]
             }
-        # 标准写法，不会丢失文件句柄
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(dump_data, f, ensure_ascii=False, indent=2)
+        # 标准规范写法，不会缺失fp参数
+        with open(DATA_FILE, "w", encoding="utf-8") as file_handle:
+            json.dump(dump_data, file_handle, ensure_ascii=False, indent=2)
         return True
     except Exception as err:
         st.error(f"本地保存异常：{str(err)}，内存图片保留，可正常编辑")
@@ -157,7 +158,7 @@ if img_name_list:
     selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张）", img_name_list, index=idx)
     st.session_state.current_img_name = selected_img
 
-# ========== 学生页面（无红框） ==========
+# ========== 学生页面（无红框，不影响单词点读） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
     st.info("仅浏览单词、浏览器语音朗读")
@@ -238,7 +239,7 @@ else:
                     if img is None:
                         fail_list.append(msg)
                         continue
-                    # 同名仅替换图片，保留热点
+                    # 同名图片只替换原图，保留已存热点
                     if file.name in st.session_state.image_pool:
                         st.session_state.image_pool[file.name]["img"] = img
                         st.info(f"{file.name}：已更新图片，原有热点保留")
@@ -310,11 +311,11 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 管理员预览画布 + 两点拾取（修复orig变量错误）
+    # 管理员预览画布 + 两点拾取（修复orig变量不存在报错）
     if img_name_list and selected_img and selected_img in st.session_state.image_pool:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
-        orig_w, orig_h = origin_img.size # 修复之前 orig.size 未定义报错
+        orig_w, orig_h = origin_img.size
         hotspot_list = current_data["hotspots"]
         tx1,ty1,tx2,ty2 = st.session_state.temp_x1, st.session_state.temp_y1, st.session_state.temp_x2, st.session_state.temp_y2
         valid_temp_box = tx1 < tx2 and ty1 < ty2
@@ -338,7 +339,7 @@ else:
                 width=display_w,
                 key="coord_picker"
             )
-            st.caption("📌 两点拾取操作：先点物体左上角 → 再点右下角")
+            st.caption("📌 两点拾取：先点物体左上角 → 再点右下角")
             if val is not None:
                 scr_x = val["x"]
                 scr_y = val["y"]
