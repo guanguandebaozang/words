@@ -2,23 +2,27 @@ import streamlit as st
 from PIL import Image, ImageDraw
 import json
 import hashlib
+from streamlit_cookies_controller import CookieController
+
+# 初始化Cookie控制器（持久化登录）
+cookie_controller = CookieController()
 
 st.set_page_config(page_title="🏫校园场景点读学英语", layout="wide")
 
-# SHA256加密工具（修复：hexdigest() 加括号执行）
+# SHA256加密工具
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# 读取云端secrets（独立key，无嵌套）
+# 读取云端Secrets
 try:
     ADMIN_USER = st.secrets["admin_user"]
     ADMIN_HASH = st.secrets["admin_hash"]
 except Exception as e:
-    st.error("读取Secrets配置失败，请检查后台密钥！")
+    st.error("读取Secrets配置失败！")
     st.stop()
 
-# 会话状态初始化
+# 会话初始化
 if "bg_img" not in st.session_state:
     st.session_state.bg_img = None
 if "draw_canvas" not in st.session_state:
@@ -32,7 +36,14 @@ if "is_admin" not in st.session_state:
 if "admin_name" not in st.session_state:
     st.session_state.admin_name = ""
 
-# 页面切换（游客默认免登录）
+# 页面加载时自动读取Cookie恢复登录状态
+saved_login = cookie_controller.get("admin_login_status")
+saved_name = cookie_controller.get("admin_name")
+if saved_login == "true" and saved_name:
+    st.session_state.is_admin = True
+    st.session_state.admin_name = saved_name
+
+# 页面切换
 st.title("🏫 校园实景热点点读英语学习平台")
 st.divider()
 col_switch1, col_switch2 = st.columns([1, 4])
@@ -40,7 +51,7 @@ with col_switch1:
     page_choose = st.radio("页面入口", ["学生学习页", "管理员后台"])
 st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "admin"
 
-# ========== 游客学生页面（完全免登录） ==========
+# ========== 游客学生页面（免登录） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
     st.info("仅浏览单词、浏览器语音朗读，无任何编辑上传权限")
@@ -83,7 +94,7 @@ if st.session_state.view_mode == "visit":
             with b2:
                 st.button("🔊 朗读例句", on_click=lambda: st.components.v1.html("<script>readSentence()</script>", height=0))
 
-# ========== 管理员登录区域 ==========
+# ========== 管理员后台（Cookie持久登录） ==========
 else:
     if not st.session_state.is_admin:
         st.subheader("🔐 管理员登录验证")
@@ -94,7 +105,7 @@ else:
             if submit_btn:
                 input_user = username_input.strip()
                 input_hash = get_pwd_hash(password_input)
-                # 调试输出
+                # 调试面板
                 with st.expander("调试信息（管理员查看）"):
                     st.write("云端存储哈希：", ADMIN_HASH)
                     st.write("输入密码生成哈希：", input_hash)
@@ -103,6 +114,9 @@ else:
                 if input_user != ADMIN_USER:
                     st.error("用户名不正确")
                 elif input_hash == ADMIN_HASH:
+                    # 存入Cookie，有效期7天
+                    cookie_controller.set("admin_login_status", "true", expires=7)
+                    cookie_controller.set("admin_name", "校园管理员", expires=7)
                     st.session_state.is_admin = True
                     st.session_state.admin_name = "校园管理员"
                     st.rerun()
@@ -110,11 +124,15 @@ else:
                     st.error("密码错误，请核对两段哈希是否一致")
         st.stop()
 
-    # 登录成功后台编辑区
+    # 登录成功后台
     st.subheader("🔐 管理员单词配置后台")
     st.success(f"欢迎管理员 {st.session_state.admin_name}")
     if st.button("退出登录"):
+        # 清除Cookie + 清空会话
+        cookie_controller.remove("admin_login_status")
+        cookie_controller.remove("admin_name")
         st.session_state.is_admin = False
+        st.session_state.admin_name = ""
         st.rerun()
 
     # 侧边编辑区
@@ -188,7 +206,7 @@ else:
             if st.button("删除该热点"):
                 st.session_state.hotspot_list.pop(del_idx)
                 st.session_state.draw_canvas = st.session_state.bg_img.copy()
-                draw = ImageDraw(st.session_state.draw_canvas)
+                draw = ImageDraw.Draw(st.session_state.draw_canvas)
                 for item in st.session_state.hotspot_list:
                     draw.rectangle(item["box"], outline="red", width=3)
                 st.rerun()
@@ -206,9 +224,9 @@ else:
         if st.session_state.bg_img:
             st.session_state.draw_canvas = st.session_state.bg_img.copy()
             draw = ImageDraw.Draw(st.session_state.draw_canvas)
-            for item in st.session_state.hotspot_list:
+            for item in st.session_state.draw_canvas:
                 draw.rectangle(item["box"], outline="red", width=3)
-        st.success("单词配置导入完成，切换学生页即可分享学习")
+        st.success("单词配置导入完成！切换学生页即可分享学习")
 
 # 校园高频词汇模板
 with st.expander("📚 校园英语词汇模板（管理员复制）"):
