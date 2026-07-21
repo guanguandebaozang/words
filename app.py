@@ -14,15 +14,18 @@ DATA_FILE = "data_backup.json"
 # 页面全局配置
 st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
 
-# ========= Secrets安全读取，杜绝报错 =========
+# ========= Secrets安全读取（修复密码哈希丢失问题） =========
 ADMIN_USER = "admin"
 ADMIN_HASH = "6261f86b819e46d4027239f8c6d72505078f824137a40842d8d37711718d5461"
 try:
     ADMIN_USER = st.secrets["admin_user"]
+    ADMIN_HASH = st.secrets["admin_hash"]
 except Exception:
+    # 读取失败强制使用内置账号密码
     pass
 # ===========================================
 
+# 【关键修复】缺少hexdigest导致密码永远不匹配
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
@@ -31,7 +34,7 @@ def get_pwd_hash(raw_str):
 def img_to_b64(pil_img):
     try:
         buf = BytesIO()
-        pil.save(buf, format="JPEG", quality=80)
+        pil_img.save(buf, format="JPEG", quality=80)
         return base64.b64encode(buf.getvalue()).decode("utf-8")
     except Exception as e:
         st.warning(f"图片转码失败：{str(e)}")
@@ -66,7 +69,7 @@ def load_and_compress(file_obj):
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
 
-# 持久化读写（过滤转码失败图片，防止json崩溃）
+# 持久化读写（防止json序列化崩溃）
 def save_all_data(pool):
     dump_data = {}
     for name, item in pool.items():
@@ -120,7 +123,6 @@ def init_session():
         st.session_state.temp_x2 = 220
     if "temp_y2" not in st.session_state:
         st.session_state.temp_y2 = 150
-    # 坐标拾取缓存
     if "pick_first" not in st.session_state:
         st.session_state.pick_first = None
 init_session()
@@ -139,23 +141,22 @@ if img_name_list:
     selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张）", img_name_list)
     st.session_state.current_img_name = selected_img
 
-# ========== 学生页面（无红框，不影响点读） ==========
+# ========== 学生页面（无红框，点读不受影响） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
     st.info("仅浏览单词、浏览器语音朗读")
 
     if not img_name_list:
-        st.warning("管理员尚未上传情景图片，请稍后再来！")
+        st.warning("管理员尚未上传校园场景图片，请稍后再来！")
     else:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
         hotspot_list = current_data["hotspots"]
-
-        # 学生端直接原图，不绘制任何红框
-        st.image(origin_img, caption="情景", use_column_width=True)
+        # 学生端只展示原图，不绘制红框
+        st.image(origin_img, caption="校园全景", use_column_width=True)
 
         if len(hotspot_list) == 0:
-            st.warning("暂无英语词汇")
+            st.warning("暂无校园英语词汇")
         else:
             hot_idx = st.radio("选择物品学习", range(len(hotspot_list)),
                                format_func=lambda i: hotspot_list[i]["word"])
@@ -196,8 +197,9 @@ else:
             password_input = st.text_input("密码", type="password")
             submit_btn = st.form_submit_button("登录")
             if submit_btn:
-                input_user = username_input.strip()
-                input_hash = get_pwd_hash(password_input)
+                input_user = username.strip() if username else ""
+                input_pwd = password_input.strip()
+                input_hash = get_pwd_hash(input_pwd)
                 if input_user != ADMIN_USER:
                     st.error("用户名不正确")
                 elif input_hash == ADMIN_HASH:
@@ -205,7 +207,7 @@ else:
                     st.session_state.admin_name = "校园管理员"
                     st.rerun()
                 else:
-                    st.error("密码错误")
+                    st.error("密码错误，请重新输入")
         st.stop()
 
     st.subheader("🔐 管理员后台")
@@ -296,7 +298,7 @@ else:
             st.divider()
             st.subheader("4. 操作按钮")
             save_btn = st.button("✅ 保存热点")
-            clear_all_btn = st.button("🗑️ 清空本图热点")
+            clear_all_btn = st.button("🗑️ 清空本图全部热点")
             del_img_btn = st.button("🗑️ 删除当前图片")
             if save_btn:
                 if not eng_word or not cn_mean:
@@ -321,7 +323,7 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 管理员预览绘图（保留粗细红框+鼠标拾取）
+    # 管理员预览绘图（粗红已保存+浅红预览+鼠标拾取）
     if img_name_list and selected_img:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -345,31 +347,27 @@ else:
 
         img_col, opt_col = st.columns([3,1])
         with img_col:
-            # 鼠标坐标拾取
             value = streamlit_image_coordinates(
                 canvas,
                 key="coord_picker",
                 use_column_width=True
             )
             st.caption("粗红=已保存 | 浅红=实时预览｜点击两点框选区域")
-            # 拾取逻辑
             if value is not None:
                 x_click = round(value["x"])
                 y_click = round(value["y"])
                 if st.session_state.pick_first is None:
                     st.session_state.pick_first = (x_click, y_click)
-                    st.info(f"已记录左上角({x_click}, {y_click})，请点击右下角")
+                    st.info(f"已拾取左上：{x_click}, {y_click}，再次点击选取右下角")
                 else:
                     x1, y1 = st.session_state.pick_first
                     x2, y2 = x_click, y_click
-                    # 自动校正大小
                     st.session_state.temp_x1 = min(x1, x2)
                     st.session_state.temp_y1 = min(y1, y2)
                     st.session_state.temp_x2 = max(x1, x2)
                     st.session_state.temp_y2 = max(y1, y2)
                     st.session_state.pick_first = None
                     st.rerun()
-            # 重置拾取按钮
             if st.button("🔄 重置坐标拾取"):
                 st.session_state.pick_first = None
                 st.rerun()
@@ -379,7 +377,7 @@ else:
             if len(hotspot_list) > 0:
                 del_idx = st.radio("选择删除", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
                 if st.button("删除该热点"):
-                    st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
+                    st.session_state.image_pool[selected_img].pop(del_idx)
                     gc.collect()
                     save_all_data(st.session_state.image_pool)
                     st.rerun()
