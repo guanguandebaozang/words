@@ -5,16 +5,22 @@ import hashlib
 
 st.set_page_config(page_title="🏫校园场景点读学英语", layout="wide")
 
-# SHA256加密函数，自动去除输入首尾空格
+# SHA256加密工具，自动去除首尾空格
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# 【关键：直接读取独立secrets字符串，不嵌套字典】
-ADMIN_USER = st.secrets["admin_user"]
-ADMIN_HASH = st.secrets["admin_hash"]
+# 读取云端secrets（独立key，无嵌套，不会解析错乱）
+try:
+    ADMIN_USER = st.secrets["admin_user"]
+    ADMIN_HASH = st.secrets["admin_hash"]
+    # 调试：后台只管理员可见，游客看不到
+    debug_flag = True
+except Exception as e:
+    st.error("读取Secrets失败，请检查后台密钥配置")
+    st.stop()
 
-# 会话初始化
+# 会话状态初始化
 if "bg_img" not in st.session_state:
     st.session_state.bg_img = None
 if "draw_canvas" not in st.session_state:
@@ -28,7 +34,7 @@ if "is_admin" not in st.session_state:
 if "admin_name" not in st.session_state:
     st.session_state.admin_name = ""
 
-# 页面切换（游客默认打开，无需登录）
+# 页面切换（游客默认免登录）
 st.title("🏫 校园实景热点点读英语学习平台")
 st.divider()
 col_switch1, col_switch2 = st.columns([1, 4])
@@ -36,7 +42,7 @@ with col_switch1:
     page_choose = st.radio("页面入口", ["学生学习页", "管理员后台"])
 st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "admin"
 
-# ========== 游客学生页面（完全免登录，外网直接访问） ==========
+# ========== 游客学生页面（完全免登录） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
     st.info("仅浏览单词、浏览器语音朗读，无任何编辑上传权限")
@@ -57,7 +63,7 @@ if st.session_state.view_mode == "visit":
             st.markdown(f"中文释义：{word_info['cn']}")
             st.markdown(f"校园例句：{word_info['sentence']}")
 
-            # 前端Web Speech朗读JS
+            # 前端网页朗读JS
             speak_js = f"""
             <script>
                 function readWord() {{
@@ -79,7 +85,7 @@ if st.session_state.view_mode == "visit":
             with b2:
                 st.button("🔊 朗读例句", on_click=lambda: st.components.v1.html("<script>readSentence()</script>", height=0))
 
-# ========== 管理员后台（仅切换才显示登录框） ==========
+# ========== 管理员登录区域（带调试打印） ==========
 else:
     if not st.session_state.is_admin:
         st.subheader("🔐 管理员登录验证")
@@ -88,9 +94,14 @@ else:
             password_input = st.text_input("密码", type="password")
             submit_btn = st.form_submit_button("登录")
             if submit_btn:
-                # 自动清理空格再比对
                 input_user = username_input.strip()
-                input_hash = get_pwd_hash(password_input)
+                input_hash = get_pwd(password_input)
+                # 调试输出（仅管理员登录页可见，学生页看不到）
+                with st.expander("调试信息（管理员查看）"):
+                    st.write("云端读取哈希：", ADMIN_HASH)
+                    st.write("你输入密码算出哈希：", input_hash)
+                    st.write("用户名配置：", ADMIN_USER)
+                    st.write("输入用户名：", input_user)
                 if input_user != ADMIN_USER:
                     st.error("用户名不正确")
                 elif input_hash == ADMIN_HASH:
@@ -98,10 +109,10 @@ else:
                     st.session_state.admin_name = "校园管理员"
                     st.rerun()
                 else:
-                    st.error("密码错误，请重新输入（注意不要带空格）")
+                    st.error("密码错误，请核对，查看上方调试对比两行哈希是否一致")
         st.stop()
 
-    # 登录成功编辑后台
+    # 登录成功后台编辑区
     st.subheader("🔐 管理员单词配置后台")
     st.success(f"欢迎管理员 {st.session_state.admin_name}")
     if st.button("退出登录"):
@@ -199,7 +210,7 @@ else:
             draw = ImageDraw.Draw(st.session_state.draw_canvas)
             for item in st.session_state.draw_canvas:
                 draw.rectangle(item["box"], outline="red", width=3)
-        st.success("单词配置导入完成！切换学生页即可分享学习")
+        st.success("单词配置导入完成，切换学生页即可分享学习")
 
 # 校园高频词汇模板
 with st.expander("📚 校园英语词汇模板（管理员复制）"):
