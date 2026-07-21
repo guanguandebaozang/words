@@ -75,7 +75,7 @@ def load_and_compress(file_obj):
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
 
-# 【修复】安全持久化，完整捕获文件+json异常
+# 安全持久化
 def save_all_data(pool):
     try:
         dump_data = {}
@@ -87,10 +87,8 @@ def save_all_data(pool):
                 "img_b64": b64_str,
                 "hotspots": item["hotspots"]
             }
-        # 分开定义文件句柄，杜绝参数缺失
-        f = open(DATA_FILE, "w", encoding="utf-8")
-        json.dump(dump_data, f, ensure_ascii=False, indent=2)
-        f.close()
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(dump_data, ensure_ascii=False, indent=2)
         return True
     except Exception as err:
         st.error(f"本地保存异常：{str(err)}，内存图片保留，可正常编辑")
@@ -150,17 +148,15 @@ st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "a
 
 # 读取图片列表
 img_name_list = list(st.session_state.image_pool.keys())
-# 自动匹配选中图片
 selected_img = st.session_state.current_img_name
+idx = 0
 if img_name_list:
     if selected_img in img_name_list:
         idx = img_name_list.index(selected_img)
-    else:
-        idx = 0
     selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张）", img_name_list, index=idx)
     st.session_state.current_img_name = selected_img
 
-# ========== 学生页面（无红框，原图正常展示） ==========
+# ========== 学生页面（无红框） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
     st.info("仅浏览单词、浏览器语音朗读")
@@ -170,8 +166,7 @@ if st.session_state.view_mode == "visit":
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
         hotspot_list = current_data["hotspots"]
-        # 学生纯原图无红框
-        st.image(origin_img, caption="情景", use_column_width=True)
+        st.image(origin_img, use_column_width=True, caption="情景")
         if len(hotspot_list) == 0:
             st.warning("暂无情景词汇")
         else:
@@ -256,8 +251,7 @@ else:
                 if success_count > 0:
                     st.session_state.current_img_name = new_upload_name
                     save_all_data(st.session_state.image_pool)
-                    st.success(f"成功处理{success_count}张，自动切换至最新图片！")
-                    st.rerun()
+                    st.success(f"成功处理{success_count}张，请下拉框手动切换图片查看（已移除自动刷新）")
                 else:
                     st.info("无图片处理")
 
@@ -268,16 +262,18 @@ else:
         temp_x2 = st.session_state.temp_x2
         temp_y2 = st.session_state.temp_y2
         valid_temp_box = False
+        img_w, img_h = 0, 0
         if len(img_name_list) > 0:
             current_data = st.session_state.image_pool[selected_img]
-            w, h = current_data["img"].size
+            origin_img = current_data["img"]
+            img_w, img_h = origin_img.size
             c1,c2 = st.columns(2)
             with c1:
-                st.session_state.temp_x1 = st.number_input("左上角 X", min_value=0, max_value=w, value=temp_x1, key="tx1")
-                st.session_state.temp_y1 = st.number_input("左上角 Y", min_value=0, max_value=h, value=temp_y1, key="ty1")
+                st.session_state.temp_x1 = st.number_input("左上角 X", min_value=0, max_value=img_w, value=temp_x1, key="tx1")
+                st.session_state.temp_y1 = st.number_input("左上角 Y", min_value=0, max_value=img_h, value=temp_y1, key="ty1")
             with c2:
-                st.session_state.temp_x2 = st.number_input("右下角 X", min_value=0, max_value=w, value=temp_x2, key="tx2")
-                st.session_state.temp_y2 = st.number_input("右下角 Y", min_value=0, max_value=h, value=temp_y2, key="ty2")
+                st.session_state.temp_x2 = st.number_input("右下角 X", min_value=0, max_value=img_w, value=temp_x2, key="tx2")
+                st.session_state.temp_y2 = st.number_input("右下角 Y", min_value=0, max_value=img_h, value=temp_y2, key="ty2")
             tx1,ty1,tx2,ty2 = st.session_state.temp_x1, st.session_state.temp_y1, st.session_state.temp_x2, st.session_state.temp_y2
             if tx1 < tx2 and ty1 < ty2:
                 valid_temp_box = True
@@ -313,10 +309,11 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 管理员预览画布
+    # 管理员预览画布 + 两点拾取核心代码
     if img_name_list and selected_img and selected_img in st.session_state.image_pool:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
+        orig_w, orig_h = origin.size
         hotspot_list = current_data["hotspots"]
         tx1,ty1,tx2,ty2 = st.session_state.temp_x1, st.session_state.temp_y1, st.session_state.temp_x2, st.session_state.temp_y2
         valid_temp_box = tx1 < tx2 and ty1 < ty2
@@ -327,29 +324,47 @@ else:
             bx1,by1,bx2,by2 = item["box"]
             if bx1 < bx2 and by1 < by2:
                 draw.rectangle([bx1,by1,bx2,by2], outline="#ff0000", width=6)
-        # 预览浅红框
+        # 实时浅红预览框
         if valid_temp_box:
             draw.rectangle([tx1, ty1, tx2, ty2], outline="#ff8888", width=2)
+
         img_col, opt_col = st.columns([3,1])
         with img_col:
-            val = streamlit_image_coordinates(canvas, key="coord_picker", use_column_width=True)
-            st.caption("粗红=已保存 | 浅红=实时预览｜点击两点框选")
+            # 固定宽度渲染，消除自适应缩放坐标错位
+            display_w = 900
+            scale_ratio = orig_w / display_w
+            val = streamlit_image_coordinates(
+                canvas,
+                width=display_w,
+                key="coord_picker"
+            )
+            st.caption("📌 两点拾取操作：先点物体左上角 → 再点右下角")
             if val is not None:
-                xc = round(val["x"])
-                yc = round(val["y"])
+                # 浏览器屏幕坐标 → 原图真实像素换算
+                scr_x = val["x"]
+                scr_y = val["y"]
+                real_x = round(scr_x * scale_ratio)
+                real_y = round(scr_y * scale_ratio * (orig_h / orig_w))
+
+                # 两点拾取核心逻辑
                 if st.session_state.pick_first is None:
-                    st.session_state.pick_first = (xc, yc)
-                    st.info(f"已拾取左上({xc},{yc})，再点右下角")
+                    # 第一点：记录左上角
+                    st.session_state.pick_first = (real_x, real_y)
+                    st.info(f"已记录左上坐标({real_x}, {real_y})，请点击右下角")
                 else:
-                    x1,y1 = st.session_state.pick_first
-                    st.session_state.temp_x1 = min(x1,xc)
-                    st.session_state.temp_y1 = min(y1,yc)
-                    st.session_state.temp_x2 = max(x1,xc)
-                    st.session_state.temp_y2 = max(y1,yc)
+                    # 第二点：自动生成合法框坐标
+                    x1_p, y1_p = st.session_state.pick_first
+                    st.session_state.temp_x1 = min(x1_p, real_x)
+                    st.session_state.temp_y1 = min(y1_p, real_y)
+                    st.session_state.temp_x2 = max(x1_p, real_x)
+                    st.session_state.temp_y2 = max(y1_p, real_y)
+                    # 清空第一点标记，完成一次框选
                     st.session_state.pick_first = None
                     st.rerun()
+            # 重置拾取按钮
             if st.button("🔄 重置坐标拾取"):
                 st.session_state.pick_first = None
+                st.rerun()
         with opt_col:
             st.subheader("热点管理")
             if len(hotspot_list) > 0:
@@ -361,7 +376,7 @@ else:
             else:
                 st.info("暂无热点可删除")
     else:
-        st.info("请上传并选择图片后预览")
+        st.info("请从上方下拉框选择图片后预览")
 
     # 热点导入导出
     st.divider()
@@ -377,7 +392,7 @@ else:
         match_count = 0
         for img_name, hotspots in load_data.items():
             if img_name in st.session_state.image_pool:
-                st.session_state.image_pool[img_name]["hotspots"] = hotspots
+                st.session_state.image_pool["hotspots"] = hotspots
                 match_count += 1
         save_all_data(st.session_state.image_pool)
         st.success(f"匹配{match_count}张图片热点恢复完成")
