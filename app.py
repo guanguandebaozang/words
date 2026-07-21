@@ -14,9 +14,8 @@ DATA_FILE = "data_backup.json"
 # 页面全局配置
 st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
 
-# ========= 登录配置（修复正确哈希，账号admin 密码school2026） =========
+# ========= 登录配置 账号admin 密码school2026 =========
 ADMIN_USER = "admin"
-# school2026 正确sha256
 ADMIN_HASH = "5cee8df435262631ed30289e56c6ccb661f1628b24e107533146894471d49de5"
 try:
     ADMIN_USER = st.secrets["admin_user"]
@@ -76,7 +75,7 @@ def load_and_compress(file_obj):
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
 
-# 【彻底修复dump fp报错】标准with上下文写入
+# 【修复dump fp报错】标准文件写入
 def save_all_data(pool):
     try:
         dump_data = {}
@@ -88,7 +87,6 @@ def save_all_data(pool):
                 "img_b64": b64_str,
                 "hotspots": item["hotspots"]
             }
-        # 标准规范写法，不会缺失fp参数
         with open(DATA_FILE, "w", encoding="utf-8") as file_handle:
             json.dump(dump_data, file_handle, ensure_ascii=False, indent=2)
         return True
@@ -239,7 +237,7 @@ else:
                     if img is None:
                         fail_list.append(msg)
                         continue
-                    # 同名图片只替换原图，保留已存热点
+                    # 同名仅更新图片，保留原有热点
                     if file.name in st.session_state.image_pool:
                         st.session_state.image_pool[file.name]["img"] = img
                         st.info(f"{file.name}：已更新图片，原有热点保留")
@@ -264,7 +262,7 @@ else:
         temp_x2 = st.session_state.temp_x2
         temp_y2 = st.session_state.temp_y2
         valid_temp_box = False
-        img_w, img_h = 0, 0
+        img_w, img_h = 0
         if len(img_name_list) > 0:
             current_data = st.session_state.image_pool[selected_img]
             origin_img = current_data["img"]
@@ -311,7 +309,7 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 管理员预览画布 + 两点拾取（修复orig变量不存在报错）
+    # 管理员预览画布 + 【修复双轴独立缩放，坐标完全对齐】
     if img_name_list and selected_img and selected_img in st.session_state.image_pool:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -325,7 +323,7 @@ else:
         for item in hotspot_list:
             bx1,by1,bx2,by2 = item["box"]
             if bx1 < bx2 and by1 < by2:
-                draw.rectangle([bx1,by1,bx2,by2], outline="#ff0000", width=6)
+                draw.rectangle([bx1,by1,bx2], outline="#ff0000", width=6)
         # 实时浅红预览框
         if valid_temp_box:
             draw.rectangle([tx1, ty1, tx2, ty2], outline="#ff8888", width=2)
@@ -333,22 +331,28 @@ else:
         img_col, opt_col = st.columns([3,1])
         with img_col:
             display_w = 900
-            scale_ratio = orig_w / display_w
+            # 计算画布真实高度，保证等比例不拉伸
+            display_h = display_w * orig_h / orig_w
+            # 双独立缩放比例，彻底解决Y轴错位
+            scale_x = orig_w / display_w
+            scale_y = orig_h / display_h
+
             val = streamlit_image_coordinates(
                 canvas,
                 width=display_w,
                 key="coord_picker"
             )
-            st.caption("📌 两点拾取：先点物体左上角 → 再点右下角")
+            st.caption("📌 两点拾取：先点左上角 → 再点右下角，坐标与输入框完全匹配")
             if val is not None:
                 scr_x = val["x"]
                 scr_y = val["y"]
-                real_x = round(scr_x * scale_ratio)
-                real_y = round(scr_y * scale_ratio * (orig_h / orig_w))
+                # 分开换算X/Y原图像素
+                real_x = round(scr_x * scale_x)
+                real_y = round(scr_y * scale_y)
 
                 if st.session_state.pick_first is None:
                     st.session_state.pick_first = (real_x, real_y)
-                    st.info(f"已记录左上坐标({real_x}, {real_y})，请点击右下角")
+                    st.info(f"原图坐标({real_x}, {real_y})，请点击右下角")
                 else:
                     x1_p, y1_p = st.session_state.pick_first
                     st.session_state.temp_x1 = min(x1_p, real_x)
@@ -364,13 +368,11 @@ else:
             if len(hotspot_list) > 0:
                 del_idx = st.radio("选择删除", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
                 if st.button("删除该热点"):
-                    st.session_state.image_pool[selected_img].pop(del_idx)
+                    st.session_state.image_pool.pop(del_idx)
                     save_all_data(st.session_state.image_pool)
                     st.rerun()
             else:
                 st.info("暂无热点可删除")
-    else:
-        st.info("请从上方下拉框选择图片后预览")
 
     # 热点导入导出
     st.divider()
@@ -386,7 +388,7 @@ else:
         match_count = 0
         for img_name, hotspots in load_data.items():
             if img_name in st.session_state.image_pool:
-                st.session_state.image_pool[img_name]["hotspots"] = hotspots
+                st.session_state.image_pool["hotspots"] = hotspots
                 match_count += 1
         save_all_data(st.session_state.image_pool)
         st.success(f"匹配{match_count}张图片热点恢复完成")
