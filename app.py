@@ -61,7 +61,8 @@ if img_name_list:
 # ========== 游客学生页面（免登录） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
-    st.info("仅浏览单词、浏览器语音朗读，无任何编辑上传权限，有任何需求可联系关关 VX：lgln11,QQ:"2603970758)
+    # 修复双引号冲突：内层QQ号改用单引号
+    st.info("仅浏览单词、浏览器语音朗读，无任何编辑上传权限，有任何需求可联系关关 VX：lgln11,QQ:'2603970758'")
 
     if not img_name_list:
         st.warning("管理员尚未上传校园场景图片，请稍后再来！")
@@ -143,7 +144,6 @@ else:
     with st.sidebar:
         st.header("1. 批量上传场景图片")
         st.info("单次最多上传8张，大图自动压缩，避免页面卡死")
-        # 移除报错参数 clear_on_submit=True
         upload_imgs = st.file_uploader(
             "支持jpg/png/jpeg，可多选",
             type=["jpg", "png", "jpeg"],
