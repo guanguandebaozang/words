@@ -4,6 +4,7 @@ import json
 import hashlib
 import gc
 
+# 页面全局配置，限制上传大小
 st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide")
 
 # 哈希加密工具
@@ -11,17 +12,21 @@ def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# 图片压缩函数，限制最长边1200，防止大图卡死
-def compress_image(img):
+# 图片压缩+大小校验，单图限制8MB，最长边1200
+def compress_image(file_obj):
+    max_file_size = 8 * 1024 * 1024
+    if file_obj.size > max_file_size:
+        return None, "图片超过8MB限制，请压缩后重新上传"
+    raw_img = Image.open(file_obj).convert("RGB")
     max_long_edge = 1200
-    w, h = img.size
+    w, h = raw_img.size
     long_edge = max(w, h)
     if long_edge > max_long_edge:
         scale = max_long_edge / long_edge
         new_w = int(w * scale)
         new_h = int(h * scale)
-        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    return img
+        raw_img = raw.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    return raw_img, "ok"
 
 # 读取云端Secrets
 try:
@@ -31,17 +36,19 @@ except Exception as e:
     st.error("读取后台密钥失败，请检查Streamlit Secrets配置！")
     st.stop()
 
-# 会话状态初始化
-if "image_pool" not in st.session_state:
-    st.session_state.image_pool = {}
-if "current_img_name" not in st.session_state:
-    st.session_state.current_img_name = ""
-if "view_mode" not in st.session_state:
-    st.session_state.view_mode = "visit"
-if "is_admin" not in st.session_state:
-    st.session_state.is_admin = False
-if "admin_name" not in st.session_state:
-    st.session_state.admin_name = ""
+# 会话状态统一初始化
+def init_session():
+    if "image_pool" not in st.session_state:
+        st.session_state.image_pool = {}
+    if "current_img_name" not in st.session_state:
+        st.session_state.current_img_name = ""
+    if "view_mode" not in st.session_state:
+        st.session_state.view_mode = "visit"
+    if "is_admin" not in st.session_state:
+        st.session_state.is_admin = False
+    if "admin_name" not in st.session_state:
+        st.session_state.admin_name = ""
+init_session()
 
 # 页面顶部切换
 st.title("🏫 沉浸式情景点读英语学习平台")
@@ -61,7 +68,6 @@ if img_name_list:
 # ========== 游客学生页面（免登录） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
-    # 修复双引号冲突：内层QQ号改用单引号
     st.info("仅浏览单词、浏览器语音朗读，无任何编辑上传权限，有任何需求可联系关关 VX：lgln11,QQ:'2603970758'")
 
     if not img_name_list:
@@ -143,12 +149,15 @@ else:
     # 侧边编辑区
     with st.sidebar:
         st.header("1. 批量上传场景图片")
-        st.info("单次最多上传8张，大图自动压缩，避免页面卡死")
+        st.info("单次最多8张，单张≤8MB，大图自动压缩，上传完成点上方下拉框刷新")
+        # 添加唯一key，避免组件冲突卡死
         upload_imgs = st.file_uploader(
             "支持jpg/png/jpeg，可多选",
             type=["jpg", "png", "jpeg"],
-            accept_multiple_files=True
+            accept_multiple_files=True,
+            key="img_upload_key_fix"
         )
+        upload_success = False
         if upload_imgs:
             if len(upload_imgs) > 8:
                 st.error("单次最多上传8张图片，请分批次上传！")
@@ -157,20 +166,25 @@ else:
                 total = len(upload_imgs)
                 success_count = 0
                 for idx, file in enumerate(upload_imgs):
-                    progress_bar.progress((idx + 1) / total, text=f"正在处理：{file.name}")
+                    progress_bar.progress((idx + 1) / total, text=f"处理：{file.name}")
                     if file.name not in st.session_state.image_pool:
-                        raw_img = Image.open(file).convert("RGB")
-                        small_img = compress_image(raw_img)
+                        img, msg = compress_image(file)
+                        if img is None:
+                            st.warning(f"{file.name}：{msg}，跳过该文件")
+                            continue
                         st.session_state.image_pool[file.name] = {
-                            "img": small_img,
+                            "img": img,
                             "hotspots": []
                         }
                         success_count += 1
-                        del raw_img
+                        del img
                         gc.collect()
                 progress_bar.empty()
-                st.success(f"成功上传{success_count}张图片，上方下拉框切换图片")
-                st.rerun()
+                if success_count > 0:
+                    st.success(f"成功上传{success_count}张！请切换上方下拉框查看图片")
+                    upload_success = True
+                else:
+                    st.info("无新增图片或全部图片超限被跳过")
 
         st.divider()
         if img_name_list and selected_img:
@@ -224,7 +238,7 @@ else:
         else:
             st.info("请先上传图片再配置热点")
 
-    # 主区域图片预览 + 热点删除面板
+    # 主区域图片预览（上传后切换下拉框即可刷新，不阻塞上传流程）
     if img_name_list and selected_img:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -245,7 +259,7 @@ else:
                 del_idx = st.radio("选择删除单词", range(len(hotspot_list)),
                                    format_func=lambda i: hotspot_list[i]["word"])
                 if st.button("删除该热点"):
-                    st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
+                    st.session_state.image_pool[selected_img].pop(del_idx)
                     st.rerun()
 
     # 全套热点备份/导入
@@ -257,7 +271,7 @@ else:
     json_dump = json.dumps(export_data, ensure_ascii=False, indent=2)
     st.download_button("💾 导出全部热点配置JSON", data=json_dump, file_name="all_hotspots_backup.json")
 
-    json_upload = st.file_uploader("📂 导入热点备份JSON（需提前上传同名图片）", type="json")
+    json_upload = st.file_uploader("📂 导入热点备份JSON", type="json", key="json_upload_fix")
     if json_upload:
         load_data = json.load(json_upload)
         match_count = 0
