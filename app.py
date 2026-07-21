@@ -7,9 +7,9 @@ import gc
 # 页面全局配置，侧边默认展开
 st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
 
-# 哈希加密函数（修复编码问题）
+# 哈希加密函数【修复变量名错误】
 def get_pwd_hash(raw_str):
-    clean_str = raw.strip()
+    clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
 # 图片压缩函数
@@ -25,7 +25,7 @@ def compress_image(file_obj):
         scale = max_long_edge / long_edge
         new_w = int(w * scale)
         new_h = int(h * scale)
-        raw_img = raw_img.resize((new_w, Image.Resampling.LANCZOS))
+        raw_img = raw_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
     return raw_img, "ok"
 
 # 读取云端Secrets
@@ -82,7 +82,7 @@ if st.session_state.view_mode == "visit":
         for item in hotspot_list:
             bx1, by1, bx2, by2 = item["box"]
             if bx1 < bx2 and by1 < by2:
-                draw.rectangle([bx1, by1, bx2, by2], outline="red", width=6)
+                draw.rectangle([bx1, by1, bx2, by2], outline="#ff0000", width=6)
 
         st.image(canvas, caption="校园全景（红色粗框=单词学习热点）", use_column_width=True)
 
@@ -239,19 +239,19 @@ else:
         else:
             st.info("请先上传并选择一张图片，解锁坐标预览")
 
-    # 主预览图（实线=已保存，浅红细框=实时预览）
+    # 主预览图：粗红=已保存，浅红细线=实时预览
     if img_name_list and selected_img:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
         hotspot_list = current_data["hotspots"]
         canvas = origin_img.copy()
         draw = ImageDraw.Draw(canvas)
-        # 绘制已保存粗红框
+        # 已保存粗红框
         for item in hotspot_list:
             bx1, by1, bx2, by2 = item["box"]
             if bx1 < bx2 and by1 < by2:
                 draw.rectangle([bx1, by1, bx2, by2], outline="#ff0000", width=6)
-        # 绘制实时预览浅红细框
+        # 实时预览浅红细框
         if valid_temp_box:
             draw.rectangle([temp_x1, temp_y1, temp_x2, temp_y2], outline="#ff8888", width=2)
 
@@ -263,10 +263,10 @@ else:
             if len(hotspot_list) > 0:
                 del_idx = st.radio("选择删除", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
                 if st.button("删除该热点"):
-                    st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
+                    st.session_state.image_pool[selected_img].pop(del_idx)
                     st.rerun()
 
-    # 备份导入导出
+    # 全套热点备份/恢复
     st.divider()
     st.subheader("全套热点备份/恢复")
     export_data = {}
@@ -274,6 +274,7 @@ else:
         export_data[name] = {"hotspots": data["hotspots"]}
     json_dump = json.dumps(export_data, ensure_ascii=False, indent=2)
     st.download_button("💾 导出全部热点配置JSON", data=json_dump, file_name="all_hotspots_backup.json")
+
     json_upload = st.file_uploader("📂 导入热点备份JSON", type="json", key="json_upload_fix")
     if json_upload:
         load_data = json.load(json_upload)
