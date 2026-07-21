@@ -19,7 +19,6 @@ ADMIN_USER = "admin"
 ADMIN_HASH = "6261f86b819e46d4027239f8c6d72505078f824137a40842d8d37711718d5461"
 try:
     ADMIN_USER = st.secrets["admin_user"]
-    ADMIN_HASH = st.secrets["admin_hash"]
 except Exception:
     pass
 # ===========================================
@@ -28,15 +27,22 @@ def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# PIL <-> Base64 转换，用于JSON存储图片
+# PIL <-> Base64 转换，增加异常捕获
 def img_to_b64(pil_img):
-    buf = BytesIO()
-    pil_img.save(buf, format="JPEG", quality=80)
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
+    try:
+        buf = BytesIO()
+        pil.save(buf, format="JPEG", quality=80)
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    except Exception as e:
+        st.warning(f"图片转码失败：{str(e)}")
+        return None
 
 def b64_to_img(b64_str):
-    buf = BytesIO(base64.b64decode(b64_str))
-    return Image.open(buf).convert("RGB")
+    try:
+        buf = BytesIO(base64.b64decode(b64_str))
+        return Image.open(buf).convert("RGB")
+    except Exception:
+        return None
 
 # 图片压缩
 def load_and_compress(file_obj):
@@ -60,13 +66,16 @@ def load_and_compress(file_obj):
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
 
-# 持久化读写
+# 持久化读写（过滤转码失败图片，防止json崩溃）
 def save_all_data(pool):
     dump_data = {}
     for name, item in pool.items():
-        b64 = img_to_b64(item["img"])
+        img_obj = item["img"]
+        b64_str = img_to_b64(img_obj)
+        if b64_str is None:
+            continue
         dump_data[name] = {
-            "img_b64": b64,
+            "img_b64": b64_str,
             "hotspots": item["hotspots"]
         }
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -81,6 +90,8 @@ def load_all_data():
         pool = {}
         for name, d in raw.items():
             img = b64_to_img(d["img_b64"])
+            if img is None:
+                continue
             pool[name] = {
                 "img": img,
                 "hotspots": d["hotspots"]
@@ -128,23 +139,23 @@ if img_name_list:
     selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张）", img_name_list)
     st.session_state.current_img_name = selected_img
 
-# ========== 学生页面（已移除所有红框绘制，只展示原图） ==========
+# ========== 学生页面（无红框，不影响点读） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
     st.info("仅浏览单词、浏览器语音朗读")
 
     if not img_name_list:
-        st.warning("管理员尚未上传校园场景图片，请稍后再来！")
+        st.warning("管理员尚未上传情景图片，请稍后再来！")
     else:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
         hotspot_list = current_data["hotspots"]
 
-        # 学生端：直接使用原图，不绘制任何红色热点框
-        st.image(origin_img, caption="校园全景", use_column_width=True)
+        # 学生端直接原图，不绘制任何红框
+        st.image(origin_img, caption="情景", use_column_width=True)
 
         if len(hotspot_list) == 0:
-            st.warning("暂无校园英语词汇")
+            st.warning("暂无英语词汇")
         else:
             hot_idx = st.radio("选择物品学习", range(len(hotspot_list)),
                                format_func=lambda i: hotspot_list[i]["word"])
@@ -176,7 +187,7 @@ if st.session_state.view_mode == "visit":
             with b2:
                 st.button("🔊 朗读例句", on_click=lambda: st.components.v1.html("<script>readSentence()</script>", height=0))
 
-# ========== 管理员后台（正常显示粗细红框+鼠标拾取坐标） ==========
+# ========== 管理员后台 ==========
 else:
     if not st.session_state.is_admin:
         st.subheader("🔐 管理员登录验证")
@@ -228,6 +239,8 @@ else:
                         continue
                     if file.name in st.session_state.image_pool:
                         st.warning(f"{file.name} 已存在，跳过")
+                        del img
+                        gc.collect()
                         continue
                     st.session_state.image_pool[file.name] = {"img": img, "hotspots": []}
                     success_count += 1
@@ -237,6 +250,7 @@ else:
                 for err in fail_list:
                     st.warning(err)
                 if success_count > 0:
+                    gc.collect()
                     save_all_data(st.session_state.image_pool)
                     st.success(f"成功上传{success_count}张，自动刷新！")
                     st.rerun()
@@ -254,7 +268,7 @@ else:
             st.info("请先上传图片")
         else:
             current_data = st.session_state.image_pool[selected_img]
-            w, h = current_data["img"]
+            w, h = current_data["img"].size
             c1, c2 = st.columns(2)
             with c1:
                 st.session_state.temp_x1 = st.number_input("左上角 X", min_value=0, max_value=w, value=temp_x1, key="tx1")
@@ -292,11 +306,13 @@ else:
                 else:
                     hot_data = {"box":[tx1,ty1,tx2,ty2],"word":eng_word,"phonetic":phonetic,"cn":cn_mean,"sentence":sentence}
                     st.session_state.image_pool[selected_img]["hotspots"].append(hot_data)
+                    gc.collect()
                     save_all_data(st.session_state.image_pool)
                     st.success(f"【{eng_word}】保存成功")
                     st.rerun()
             if clear_all_btn:
                 st.session_state.image_pool[selected_img]["hotspots"] = []
+                gc.collect()
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
             if del_img_btn:
@@ -305,7 +321,7 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 管理员预览绘图（保留粗红已保存框+浅红预览框+鼠标拾取）
+    # 管理员预览绘图（保留粗细红框+鼠标拾取）
     if img_name_list and selected_img:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -342,10 +358,11 @@ else:
                 y_click = round(value["y"])
                 if st.session_state.pick_first is None:
                     st.session_state.pick_first = (x_click, y_click)
-                    st.info(f"已拾取左上：{x_click}, {y_click}，再次点击选取右下角")
+                    st.info(f"已记录左上角({x_click}, {y_click})，请点击右下角")
                 else:
                     x1, y1 = st.session_state.pick_first
                     x2, y2 = x_click, y_click
+                    # 自动校正大小
                     st.session_state.temp_x1 = min(x1, x2)
                     st.session_state.temp_y1 = min(y1, y2)
                     st.session_state.temp_x2 = max(x1, x2)
@@ -363,6 +380,7 @@ else:
                 del_idx = st.radio("选择删除", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
                 if st.button("删除该热点"):
                     st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
+                    gc.collect()
                     save_all_data(st.session_state.image_pool)
                     st.rerun()
             else:
@@ -376,14 +394,16 @@ else:
         export_data[name] = {"hotspots": data["hotspots"]}
     json_dump = json.dumps(export_data, ensure_ascii=False, indent=2)
     st.download_button("💾 导出全部热点JSON", data=json_dump, file_name="all_hotspots_backup.json")
+
     json_upload = st.file_uploader("📂 导入备份JSON", type="json", key="json_upload_fix")
     if json_upload:
         load_data = json.load(json_upload)
         match_count = 0
         for img_name, hotspots in load_data.items():
             if img_name in st.session_state.image_pool:
-                st.session_state.image_pool[img_name]["hotspots"] = hotspots["hotspots"]
+                st.session_state.image_pool[img_name]["hotspots"] = hotspots
                 match_count += 1
+        gc.collect()
         save_all_data(st.session_state.image_pool)
         st.success(f"匹配{match_count}张图片热点恢复完成")
         st.rerun()
