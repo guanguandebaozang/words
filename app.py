@@ -31,11 +31,12 @@ def load_and_compress(file_obj):
     except Exception as e:
         return None, f"{file_obj.name} 图片损坏/格式不支持"
 
-# 会话初始化
+# 会话初始化（修复语法错误行）
 def init_session():
     if "image_pool" not in st.session_state:
         st.session_state.image_pool = {}
-    if "current_img_name" not in st.session_state.current_img_name = ""
+    if "current_img_name" not in st.session_state:
+        st.session_state.current_img_name = ""
     if "view_mode" not in st.session_state:
         st.session_state.view_mode = "visit"
     if "is_admin" not in st.session_state:
@@ -48,7 +49,7 @@ init_session()
 st.title("🏫 沉浸式情景点读英语学习平台")
 st.divider()
 
-# 密钥读取 + 全部业务逻辑放入try，防止变量未定义
+# 密钥读取+全部业务逻辑包裹，防止变量未定义
 try:
     ADMIN_USER = st.secrets["admin_user"]
     ADMIN_HASH = st.secrets["admin_hash"]
@@ -230,7 +231,7 @@ try:
                         st.error("坐标不合法，无法保存！")
                     else:
                         hot_data = {"box": [temp_x1, temp_y1, temp_x2, temp_y2], "word": eng_word, "phonetic": phonetic, "cn": cn_mean, "sentence": sentence}
-                        st.session_state.image_pool[hotspots].append(hot_data)
+                        st.session_state.image_pool[selected_img]["hotspots"].append(hot_data)
                         st.success(f"热点【{eng_word}】保存成功！")
                         st.rerun()
                 if clear_all_btn:
@@ -241,7 +242,7 @@ try:
                     gc.collect()
                     st.rerun()
 
-        # 图片预览区
+        # 主预览区域：粗红永久热点 + 浅红实时预览
         if img_name_list and selected_img:
             current_data = st.session_state.image_pool[selected_img]
             origin_img = current_data["img"]
@@ -265,10 +266,10 @@ try:
                 if len(hotspot_list) > 0:
                     del_idx = st.radio("选择删除", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
                     if st.button("删除该热点"):
-                        st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
+                        st.session_state.image_pool[selected_img].pop(del_idx)
                         st.rerun()
 
-        # 导入导出
+        # 全套热点备份/恢复
         st.divider()
         st.subheader("全套热点备份/恢复")
         export_data = {}
@@ -289,5 +290,5 @@ try:
             st.rerun()
 
 except Exception as e:
-    st.error(f"系统密钥加载失败：{e}")
+    st.error(f"密钥加载失败：{e}")
     st.stop()
