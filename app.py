@@ -2,13 +2,26 @@ import streamlit as st
 from PIL import Image, ImageDraw
 import json
 import hashlib
+import gc
 
-st.set_page_config(page_title="🏫校园实景热点点读学英语", layout="wide")
+st.set_page_config(page_title="🏫校园实景热点点读英语", layout="wide")
 
 # 哈希加密工具
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
+
+# 图片压缩函数，限制最长边1200，防止大图卡死
+def compress_image(img):
+    max_long_edge = 1200
+    w, h = img.size
+    long_edge = max(w, h)
+    if long_edge > max_long_edge:
+        scale = max_long_edge / long_edge
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    return img
 
 # 读取云端Secrets
 try:
@@ -20,7 +33,6 @@ except Exception as e:
 
 # 会话状态初始化
 if "image_pool" not in st.session_state:
-    # 存储所有图片：{图片名称: {"img":原图对象, "hotspots":热点数组}}
     st.session_state.image_pool = {}
 if "current_img_name" not in st.session_state:
     st.session_state.current_img_name = ""
@@ -58,7 +70,6 @@ if st.session_state.view_mode == "visit":
         origin_img = current_data["img"]
         hotspot_list = current_data["hotspots"]
 
-        # 绘制当前图片所有热点红框
         canvas = origin_img.copy()
         draw = ImageDraw.Draw(canvas)
         for item in hotspot_list:
@@ -79,7 +90,6 @@ if st.session_state.view_mode == "visit":
             st.markdown(f"中文释义：{word_info['cn']}")
             st.markdown(f"校园例句：{word_info['sentence']}")
 
-            # 前端Web Speech朗读JS
             speak_js = f"""
             <script>
                 function readWord() {{
@@ -132,17 +142,39 @@ else:
     # 侧边编辑区
     with st.sidebar:
         st.header("1. 批量上传场景图片")
-        upload_imgs = st.file_uploader("支持jpg/png/jpeg，可多选批量上传", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
+        st.info("单次最多上传8张，大图自动压缩，避免页面卡死")
+        upload_imgs = st.file_uploader(
+            "支持jpg/png/jpeg，可多选",
+            type=["jpg", "png", "jpeg"],
+            accept_multiple_files=True,
+            clear_on_submit=True
+        )
         if upload_imgs:
-            for file in upload_imgs:
-                if file.name not in st.session_state.image_pool:
-                    img = Image.open(file).convert("RGB")
-                    st.session_state.image_pool[file.name] = {
-                        "img": img,
-                        "hotspots": []
-                    }
-            st.success("图片上传完成，上方下拉框切换图片")
-            st.rerun()
+            # 限制最大上传数量
+            if len(upload_imgs) > 8:
+                st.error("单次最多上传8张图片，请分批次上传！")
+            else:
+                progress_bar = st.progress(0)
+                total = len(upload_imgs)
+                success_count = 0
+                for idx, file in enumerate(upload_imgs):
+                    progress_bar.progress((idx + 1) / total, text=f"正在处理：{file.name}")
+                    if file.name not in st.session_state.image_pool:
+                        # 读取并压缩图片
+                        raw_img = Image.open(file).convert("RGB")
+                        small_img = compress_image(raw_img)
+                        # 存入内存
+                        st.session_state.image_pool[file.name] = {
+                            "img": small_img,
+                            "hotspots": []
+                        }
+                        success_count += 1
+                        # 释放原始大图内存
+                        del raw_img
+                        gc.collect()
+                progress_bar.empty()
+                st.success(f"成功上传{success_count}张图片，上方下拉框切换图片")
+                st.rerun()
 
         st.divider()
         if img_name_list and selected_img:
@@ -170,7 +202,6 @@ else:
             clear_all_btn = st.button("🗑️ 清空本图全部热点")
             del_img_btn = st.button("🗑️ 删除当前这张图片")
 
-            # 保存热点逻辑
             if save_btn:
                 if not eng_word or not cn_mean:
                     st.warning("英文单词和中文释义不可为空！")
@@ -186,14 +217,13 @@ else:
                     st.success(f"热点【{eng_word}】添加成功！")
                     st.rerun()
 
-            # 清空当前图片热点
             if clear_all_btn:
                 st.session_state.image_pool[selected_img]["hotspots"] = []
                 st.rerun()
 
-            # 删除当前图片
             if del_img_btn:
                 del st.session_state.image_pool[selected_img]
+                gc.collect()
                 st.rerun()
         else:
             st.info("请先上传图片再配置热点")
@@ -222,17 +252,16 @@ else:
                     st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
                     st.rerun()
 
-    # 全局多图配置导入导出
+    # 全套热点备份/导入
     st.divider()
-    st.subheader("全套图片+单词库备份/恢复")
-    # 导出：仅导出可序列化数据（图片无法序列化，仅保存热点与图片名称）
+    st.subheader("全套图片热点备份/恢复")
     export_data = {}
     for name, data in st.session_state.image_pool.items():
         export_data[name] = {"hotspots": data["hotspots"]}
     json_dump = json.dumps(export_data, ensure_ascii=False, indent=2)
     st.download_button("💾 导出全部热点配置JSON", data=json_dump, file_name="all_hotspots_backup.json")
 
-    json_upload = st.file_uploader("📂 导入热点备份JSON（需提前上传对应图片）", type="json")
+    json_upload = st.file_uploader("📂 导入热点备份JSON（需提前上传同名图片）", type="json")
     if json_upload:
         load_data = json.load(json_upload)
         match_count = 0
