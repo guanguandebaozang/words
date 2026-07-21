@@ -5,10 +5,10 @@ import hashlib
 
 st.set_page_config(page_title="🏫校园场景点读学英语", layout="wide")
 
-# SHA256加密工具，自动去除首尾空格
+# SHA256加密工具（修复：hexdigest() 加括号执行）
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
-    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest
+    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
 # 读取云端secrets（独立key，无嵌套）
 try:
@@ -83,7 +83,7 @@ if st.session_state.view_mode == "visit":
             with b2:
                 st.button("🔊 朗读例句", on_click=lambda: st.components.v1.html("<script>readSentence()</script>", height=0))
 
-# ========== 管理员后台（登录页修复函数调用） ==========
+# ========== 管理员登录区域 ==========
 else:
     if not st.session_state.is_admin:
         st.subheader("🔐 管理员登录验证")
@@ -93,9 +93,8 @@ else:
             submit_btn = st.form_submit_button("登录")
             if submit_btn:
                 input_user = username_input.strip()
-                # 修复：正确调用函数 get_pwd_hash
                 input_hash = get_pwd_hash(password_input)
-                # 调试信息
+                # 调试输出
                 with st.expander("调试信息（管理员查看）"):
                     st.write("云端存储哈希：", ADMIN_HASH)
                     st.write("输入密码生成哈希：", input_hash)
@@ -108,10 +107,10 @@ else:
                     st.session_state.admin_name = "校园管理员"
                     st.rerun()
                 else:
-                    st.error("密码错误，请核对，查看调试哈希是否一致")
+                    st.error("密码错误，请核对两段哈希是否一致")
         st.stop()
 
-    # 登录成功编辑后台
+    # 登录成功后台编辑区
     st.subheader("🔐 管理员单词配置后台")
     st.success(f"欢迎管理员 {st.session_state.admin_name}")
     if st.button("退出登录"):
@@ -189,7 +188,7 @@ else:
             if st.button("删除该热点"):
                 st.session_state.hotspot_list.pop(del_idx)
                 st.session_state.draw_canvas = st.session_state.bg_img.copy()
-                draw = ImageDraw.Draw(st.session_state.draw_canvas)
+                draw = ImageDraw(st.session_state.draw_canvas)
                 for item in st.session_state.hotspot_list:
                     draw.rectangle(item["box"], outline="red", width=3)
                 st.rerun()
@@ -207,9 +206,9 @@ else:
         if st.session_state.bg_img:
             st.session_state.draw_canvas = st.session_state.bg_img.copy()
             draw = ImageDraw.Draw(st.session_state.draw_canvas)
-            for item in st.session_state.draw_canvas:
+            for item in st.session_state.hotspot_list:
                 draw.rectangle(item["box"], outline="red", width=3)
-        st.success("单词配置导入完成！切换学生页即可分享学习")
+        st.success("单词配置导入完成，切换学生页即可分享学习")
 
 # 校园高频词汇模板
 with st.expander("📚 校园英语词汇模板（管理员复制）"):
