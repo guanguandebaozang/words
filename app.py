@@ -2,14 +2,10 @@ import streamlit as st
 from PIL import Image, ImageDraw
 import json
 import hashlib
-from streamlit_cookies_controller import CookieController
-
-# 初始化Cookie控制器（持久化登录）
-cookie_controller = CookieController()
 
 st.set_page_config(page_title="🏫校园场景点读学英语", layout="wide")
 
-# SHA256加密工具
+# 哈希加密工具
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
@@ -19,10 +15,10 @@ try:
     ADMIN_USER = st.secrets["admin_user"]
     ADMIN_HASH = st.secrets["admin_hash"]
 except Exception as e:
-    st.error("读取Secrets配置失败！")
+    st.error("读取后台密钥失败，请检查Streamlit Secrets配置！")
     st.stop()
 
-# 会话初始化
+# 会话状态初始化
 if "bg_img" not in st.session_state:
     st.session_state.bg_img = None
 if "draw_canvas" not in st.session_state:
@@ -35,13 +31,6 @@ if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
 if "admin_name" not in st.session_state:
     st.session_state.admin_name = ""
-
-# 页面加载时自动读取Cookie恢复登录状态
-saved_login = cookie_controller.get("admin_login_status")
-saved_name = cookie_controller.get("admin_name")
-if saved_login == "true" and saved_name:
-    st.session_state.is_admin = True
-    st.session_state.admin_name = saved_name
 
 # 页面切换
 st.title("🏫 校园实景热点点读英语学习平台")
@@ -94,7 +83,7 @@ if st.session_state.view_mode == "visit":
             with b2:
                 st.button("🔊 朗读例句", on_click=lambda: st.components.v1.html("<script>readSentence()</script>", height=0))
 
-# ========== 管理员后台（Cookie持久登录） ==========
+# ========== 管理员后台（已移除调试面板） ==========
 else:
     if not st.session_state.is_admin:
         st.subheader("🔐 管理员登录验证")
@@ -105,32 +94,20 @@ else:
             if submit_btn:
                 input_user = username_input.strip()
                 input_hash = get_pwd_hash(password_input)
-                # 调试面板
-                with st.expander("调试信息（管理员查看）"):
-                    st.write("云端存储哈希：", ADMIN_HASH)
-                    st.write("输入密码生成哈希：", input_hash)
-                    st.write("配置用户名：", ADMIN_USER)
-                    st.write("输入用户名：", input_user)
                 if input_user != ADMIN_USER:
                     st.error("用户名不正确")
                 elif input_hash == ADMIN_HASH:
-                    # 存入Cookie，有效期7天
-                    cookie_controller.set("admin_login_status", "true", expires=7)
-                    cookie_controller.set("admin_name", "校园管理员", expires=7)
                     st.session_state.is_admin = True
                     st.session_state.admin_name = "校园管理员"
                     st.rerun()
                 else:
-                    st.error("密码错误，请核对两段哈希是否一致")
+                    st.error("密码错误，请重新输入")
         st.stop()
 
-    # 登录成功后台
+    # 登录成功编辑后台
     st.subheader("🔐 管理员单词配置后台")
     st.success(f"欢迎管理员 {st.session_state.admin_name}")
     if st.button("退出登录"):
-        # 清除Cookie + 清空会话
-        cookie_controller.remove("admin_login_status")
-        cookie_controller.remove("admin_name")
         st.session_state.is_admin = False
         st.session_state.admin_name = ""
         st.rerun()
@@ -165,6 +142,7 @@ else:
         sentence = st.text_input("校园例句")
 
         st.divider()
+        st.header("4. 操作按钮")
         save_btn = st.button("✅ 保存当前热点")
         clear_all_btn = st.button("🗑️ 清空全部热点")
 
@@ -191,7 +169,7 @@ else:
             st.session_state.draw_canvas = st.session_state.bg_img.copy()
         st.rerun()
 
-    # 图片预览 + 删除面板
+    # 图片预览 + 热点删除面板
     img_col, opt_col = st.columns([3, 1])
     with img_col:
         if st.session_state.draw_canvas:
@@ -241,4 +219,6 @@ with st.expander("📚 校园英语词汇模板（管理员复制）"):
 8. tree /triː/ 大树
 9. bench /bentʃ/ 长椅
 10. school bus 校车
+11. garden /ˈɡɑːdn/ 花坛
+12. office /ˈɒfɪs/ 教师办公室
 """)
