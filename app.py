@@ -25,7 +25,7 @@ except Exception:
 
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
-    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
+    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest
 
 # PIL图片转纯base64
 def img_to_b64(pil_img):
@@ -75,7 +75,7 @@ def load_and_compress(file_obj):
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
 
-# 安全持久化
+# 【修复】标准with open，消除fp缺失报错
 def save_all_data(pool):
     try:
         dump_data = {}
@@ -87,8 +87,9 @@ def save_all_data(pool):
                 "img_b64": b64_str,
                 "hotspots": item["hotspots"]
             }
+        # 标准写法，不会丢失文件句柄
         with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(dump_data, ensure_ascii=False, indent=2)
+            json.dump(dump_data, f, ensure_ascii=False, indent=2)
         return True
     except Exception as err:
         st.error(f"本地保存异常：{str(err)}，内存图片保留，可正常编辑")
@@ -237,7 +238,7 @@ else:
                     if img is None:
                         fail_list.append(msg)
                         continue
-                    # 同名只替换图片，保留热点
+                    # 同名仅替换图片，保留热点
                     if file.name in st.session_state.image_pool:
                         st.session_state.image_pool[file.name]["img"] = img
                         st.info(f"{file.name}：已更新图片，原有热点保留")
@@ -309,11 +310,11 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 管理员预览画布 + 两点拾取核心代码
+    # 管理员预览画布 + 两点拾取（修复orig变量错误）
     if img_name_list and selected_img and selected_img in st.session_state.image_pool:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
-        orig_w, orig_h = origin.size
+        orig_w, orig_h = origin_img.size # 修复之前 orig.size 未定义报错
         hotspot_list = current_data["hotspots"]
         tx1,ty1,tx2,ty2 = st.session_state.temp_x1, st.session_state.temp_y1, st.session_state.temp_x2, st.session_state.temp_y2
         valid_temp_box = tx1 < tx2 and ty1 < ty2
@@ -330,7 +331,6 @@ else:
 
         img_col, opt_col = st.columns([3,1])
         with img_col:
-            # 固定宽度渲染，消除自适应缩放坐标错位
             display_w = 900
             scale_ratio = orig_w / display_w
             val = streamlit_image_coordinates(
@@ -340,31 +340,24 @@ else:
             )
             st.caption("📌 两点拾取操作：先点物体左上角 → 再点右下角")
             if val is not None:
-                # 浏览器屏幕坐标 → 原图真实像素换算
                 scr_x = val["x"]
                 scr_y = val["y"]
                 real_x = round(scr_x * scale_ratio)
                 real_y = round(scr_y * scale_ratio * (orig_h / orig_w))
 
-                # 两点拾取核心逻辑
                 if st.session_state.pick_first is None:
-                    # 第一点：记录左上角
                     st.session_state.pick_first = (real_x, real_y)
                     st.info(f"已记录左上坐标({real_x}, {real_y})，请点击右下角")
                 else:
-                    # 第二点：自动生成合法框坐标
                     x1_p, y1_p = st.session_state.pick_first
                     st.session_state.temp_x1 = min(x1_p, real_x)
                     st.session_state.temp_y1 = min(y1_p, real_y)
                     st.session_state.temp_x2 = max(x1_p, real_x)
                     st.session_state.temp_y2 = max(y1_p, real_y)
-                    # 清空第一点标记，完成一次框选
                     st.session_state.pick_first = None
                     st.rerun()
-            # 重置拾取按钮
             if st.button("🔄 重置坐标拾取"):
                 st.session_state.pick_first = None
-                st.rerun()
         with opt_col:
             st.subheader("热点管理")
             if len(hotspot_list) > 0:
@@ -392,7 +385,7 @@ else:
         match_count = 0
         for img_name, hotspots in load_data.items():
             if img_name in st.session_state.image_pool:
-                st.session_state.image_pool["hotspots"] = hotspots
+                st.session_state.image_pool[img_name]["hotspots"] = hotspots
                 match_count += 1
         save_all_data(st.session_state.image_pool)
         st.success(f"匹配{match_count}张图片热点恢复完成")
