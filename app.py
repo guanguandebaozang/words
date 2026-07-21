@@ -4,8 +4,8 @@ import json
 import hashlib
 import gc
 
-# 页面全局配置
-st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide")
+# 页面全局配置，侧边栏默认展开
+st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
 
 # 哈希加密工具
 def get_pwd_hash(raw_str):
@@ -58,7 +58,7 @@ with col_switch1:
     page_choose = st.radio("页面入口", ["学生学习页", "管理员后台"])
 st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "admin"
 
-# 全局图片下拉选择
+# 全局图片下拉选择器
 img_name_list = list(st.session_state.image_pool.keys())
 selected_img = ""
 if img_name_list:
@@ -81,7 +81,7 @@ if st.session_state.view_mode == "visit":
         draw = ImageDraw.Draw(canvas)
         for item in hotspot_list:
             bx1, by1, bx2, by2 = item["box"]
-            draw.rectangle([bx1, by1, bx2, by2], outline="red", width=4)
+            draw.rectangle([bx1, by1, bx2], outline="red", width=4)
 
         st.image(canvas, caption="校园全景（红色粗框=单词学习热点）", use_column_width=True)
 
@@ -146,16 +146,17 @@ else:
         st.session_state.admin_name = ""
         st.rerun()
 
-    # 侧边栏：上传 + 热点配置（固定显示，有图才解锁输入框）
+    # 侧边栏：上传 + 热点配置（永久展示，有图自动解锁控件）
     with st.sidebar:
         st.header("1. 批量上传场景图片")
-        st.info("单次最多8张，单张≤8MB，大图自动压缩，上传后切换上方下拉框")
+        st.info("单次最多8张，单张≤8MB，上传完成自动刷新页面")
         upload_imgs = st.file_uploader(
             "支持jpg/png/jpeg，可多选",
             type=["jpg", "png", "jpeg"],
             accept_multiple_files=True,
             key="img_upload_key_fix"
         )
+        upload_finish = False
         if upload_imgs:
             if len(upload_imgs) > 8:
                 st.error("单次最多上传8张图片，请分批次上传！")
@@ -179,63 +180,70 @@ else:
                         gc.collect()
                 progress_bar.empty()
                 if success_count > 0:
-                    st.success(f"成功上传{success_count}张！切换上方下拉框查看图片")
+                    st.success(f"成功上传{success_count}张！页面自动刷新")
+                    upload_finish = True
                 else:
                     st.info("无新增图片或全部图片超限被跳过")
+        # 上传成功强制刷新，下拉框加载新图片，热点面板显示
+        if upload_finish:
+            st.rerun()
 
         st.divider()
         st.header("2. 热点配置区域")
-        # 有选中图片才展示坐标、单词输入
-        if img_name_list and selected_img:
-            current_data = st.session_state.image_pool[selected_img]
-            w, h = current_data["img"].size
-            c1, c2 = st.columns(2)
-            with c1:
-                x1 = st.number_input("左上角 X", min_value=0, max_value=w, value=30)
-                y1 = st.number_input("左上角 Y", min_value=0, max_value=h, value=30)
-            with c2:
-                x2 = st.number_input("右下角 X", min_value=0, max_value=w, value=220)
-                y2 = st.number_input("右下角 Y", min_value=0, max_value=h, value=150)
-
-            st.divider()
-            st.subheader("单词信息录入")
-            eng_word = st.text_input("英文单词")
-            phonetic = st.text_input("国际音标")
-            cn_mean = st.text_input("中文释义")
-            sentence = st.text_input("校园例句")
-
-            st.divider()
-            st.subheader("操作按钮")
-            save_btn = st.button("✅ 保存当前热点")
-            clear_all_btn = st.button("🗑️ 清空本图全部热点")
-            del_img_btn = st.button("🗑️ 删除当前这张图片")
-
-            # 保存热点
-            if save_btn:
-                if not eng_word or not cn_mean:
-                    st.warning("英文单词和中文释义不可为空！")
-                else:
-                    hot_data = {
-                        "box": [x1, y1, x2, y2],
-                        "word": eng_word,
-                        "phonetic": phonetic,
-                        "cn": cn_mean,
-                        "sentence": sentence
-                    }
-                    st.session_state.image_pool[selected_img]["hotspots"].append(hot_data)
-                    st.success(f"热点【{eng_word}】添加成功！")
-                    st.rerun()
-            # 清空本图热点
-            if clear_all_btn:
-                st.session_state.image_pool[selected_img]["hotspots"] = []
-                st.rerun()
-            # 删除图片
-            if del_img_btn:
-                del st.session_state.image_pool[selected_img]
-                gc.collect()
-                st.rerun()
+        # 只要有图片列表就提示，选中图片才显示输入框
+        if len(img_name_list) == 0:
+            st.info("暂无图片，请先上传")
         else:
-            st.info("请先上传并选择一张图片，再配置热点")
+            if selected_img:
+                current_data = st.session_state.image_pool[selected_img]
+                w, h = current_data["img"].size
+                c1, c2 = st.columns(2)
+                with c1:
+                    x1 = st.number_input("左上角 X", min_value=0, max_value=w, value=30)
+                    y1 = st.number_input("左上角 Y", min_value=0, max_value=h, value=30)
+                with c2:
+                    x2 = st.number_input("右下角 X", min_value=0, max_value=w, value=220)
+                    y2 = st.number_input("右下角 Y", min_value=0, max_value=h, value=150)
+
+                st.divider()
+                st.subheader("单词信息录入")
+                eng_word = st.text_input("英文单词")
+                phonetic = st.text_input("国际音标")
+                cn_mean = st.text_input("中文释义")
+                sentence = st.text_input("校园例句")
+
+                st.divider()
+                st.subheader("操作按钮")
+                save_btn = st.button("✅ 保存当前热点")
+                clear_all_btn = st.button("🗑️ 清空本图全部热点")
+                del_img_btn = st.button("🗑️ 删除当前这张图片")
+
+                # 保存热点
+                if save_btn:
+                    if not eng_word or not cn_mean:
+                        st.warning("英文单词和中文释义不可为空！")
+                    else:
+                        hot_data = {
+                            "box": [x1, y1, x2, y2],
+                            "word": eng_word,
+                            "phonetic": phonetic,
+                            "cn": cn_mean,
+                            "sentence": sentence
+                        }
+                        st.session_state.image_pool[selected_img]["hotspots"].append(hot_data)
+                        st.success(f"热点【{eng_word}】添加成功！")
+                        st.rerun()
+                # 清空本图热点
+                if clear_all_btn:
+                    st.session_state.image_pool[selected_img]["hotspots"] = []
+                    st.rerun()
+                # 删除图片
+                if del_img_btn:
+                    del st.session_state.image_pool[selected_img]
+                    gc.collect()
+                    st.rerun()
+            else:
+                st.info("请在上方下拉框选择一张图片，解锁热点编辑")
 
     # 主页面：图片预览 + 热点删除面板
     if img_name_list and selected_img:
@@ -258,11 +266,10 @@ else:
                 del_idx = st.radio("选择删除单词", range(len(hotspot_list)),
                                    format_func=lambda i: hotspot_list[i]["word"])
                 if st.button("删除该热点"):
-                    # 修复之前BUG：hotspots数组.pop()
                     st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
                     st.rerun()
 
-    # 全局热点备份导入导出
+    # 全局热点备份/导入
     st.divider()
     st.subheader("全套图片热点备份/恢复")
     export_data = {}
