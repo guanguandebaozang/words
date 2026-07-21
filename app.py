@@ -4,7 +4,7 @@ import json
 import hashlib
 import gc
 
-# 页面全局配置，侧边默认展开
+# 页面全局配置，侧边永久展开
 st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
 
 # 哈希加密函数（修复变量错误）
@@ -12,12 +12,11 @@ def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# 图片压缩+安全加载，增加异常捕获、大小限制
+# 图片加载压缩，带异常捕获、8MB限制
 def load_and_compress(file_obj):
     MAX_SIZE = 8 * 1024 * 1024
-    # 校验文件大小
-    if file.size > MAX_SIZE:
-        return None, f"文件{file.name}超过8MB限制，跳过"
+    if file_obj.size > MAX_SIZE:
+        return None, f"文件{file_obj}超过8MB，跳过"
     try:
         raw_img = Image.open(file_obj).convert("RGB")
         max_long_edge = 1200
@@ -30,15 +29,7 @@ def load_and_compress(file_obj):
             raw_img = raw_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
         return raw_img, "ok"
     except Exception as e:
-        return None, f"{file.name}图片损坏/格式不支持，跳过"
-
-# 读取云端Secrets
-try:
-    ADMIN_USER = st.secrets["admin_user"]
-    ADMIN_HASH = st.secrets["admin_hash"]
-except Exception as e:
-    st.error("读取后台密钥失败，请检查Streamlit Secrets配置！")
-    st.stop()
+        return None, f"{file_obj}图片损坏/格式不支持"
 
 # 会话初始化
 def init_session():
@@ -62,11 +53,12 @@ with col_switch1:
     page_choose = st.radio("页面入口", ["学生学习页", "管理员后台"])
 st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "admin"
 
-# 全局图片下拉选择器
+# 图片下拉选择器（每次刷新自动读取最新图片池）
 img_name_list = list(st.session_state.image_pool.keys())
 selected_img = ""
+auto_rerun_flag = False  # 上传成功自动刷新标记
 if img_name_list:
-    selected_img = st.selectbox("选择场景图片（上传后重新点下拉刷新）", img_name_list)
+    selected_img = st.selectbox("选择场景图片", img_name)
     st.session_state.current_img_name = selected_img
 
 # ========== 游客学生页面 ==========
@@ -86,7 +78,7 @@ if st.session_state.view_mode == "visit":
         for item in hotspot_list:
             bx1, by1, bx2, by2 = item["box"]
             if bx1 < bx2 and by1 < by2:
-                draw.rectangle([bx1, by1, bx2], outline="#ff0000", width=6)
+                draw.rectangle([bx1, by1, bx2, by2], outline="#ff0000", width=6)
 
         st.image(canvas, caption="校园全景（红色粗框=单词学习热点）", use_column_width=True)
 
@@ -151,10 +143,10 @@ else:
         st.session_state.admin_name = ""
         st.rerun()
 
-    # 侧边栏上传区（核心修复上传阻塞问题）
+    # 侧边栏上传区
     with st.sidebar:
         st.header("1. 批量上传场景图片")
-        st.info("单次最多8张，单张≤8MB，上传完成后点击上方下拉框刷新列表")
+        st.info("单次最多8张，单张≤8MB，上传完成页面自动刷新")
         upload_imgs = st.file_uploader(
             "支持jpg/png/jpeg，可多选",
             type=["jpg", "png", "jpeg"],
@@ -168,7 +160,6 @@ else:
                 progress_bar = st.progress(0)
                 total = len(upload_imgs)
                 success_count = 0
-                # 移除循环内st.rerun，不再阻塞上传
                 for idx, file in enumerate(upload_imgs):
                     progress_bar.progress((idx + 1) / total, text=f"处理：{file.name}")
                     img, msg = load_and_compress(file)
@@ -182,32 +173,40 @@ else:
                     gc.collect()
                 progress_bar.empty()
                 if success_count > 0:
-                    st.success(f"成功上传{success_count}张！请点击上方下拉框刷新图片列表")
+                    st.success(f"成功上传{success_count}张，页面自动刷新加载图片！")
+                    auto_rerun_flag = True  # 标记需要刷新
                 else:
                     st.info("无新增图片，全部超限/损坏被跳过")
 
+        # 上传成功自动刷新页面，下拉列表更新新图片
+        if auto_rerun_flag:
+            st.rerun()
+
         st.divider()
         st.header("2. 热点坐标设置【实时预览】")
-        temp_x1 = 30
-        temp_y1 = 30
-        temp_x2 = 220
-        temp_y2 = 150
-        valid_temp_box = False
-        if len(img_name_list) > 0 and selected_img:
+        # 无图也保留文字提示，有图才显示输入框
+        if len(img_name_list) == 0:
+            st.info("暂无图片，请上传图片后自动刷新面板")
+            temp_x1, temp_y1, temp_x2, temp_y2 = 0,0,0,0
+            valid_temp_box = False
+        else:
+            # 存在图片池，只要下拉选中就解锁编辑
             current_data = st.session_state.image_pool[selected_img]
             w, h = current_data["img"].size
             c1, c2 = st.columns(2)
             with c1:
                 temp_x1 = st.number_input("左上角 X", min_value=0, max_value=w, value=30, key="tx1")
-                temp_y1 = st.number_input("左上角 Y", min_value=0, max_value=h, value=30, key="ty1")
+                temp_y1 = st.number_input("左上角 Y", min_value=0, max_value=30, key="ty1")
             with c2:
                 temp_x2 = st.number_input("右下角 X", min_value=0, max_value=w, value=220, key="tx2")
                 temp_y2 = st.number_input("右下角 Y", min_value=0, max_value=h, value=150, key="ty2")
+            # 坐标合法性判断
             if temp_x1 < temp_x2 and temp_y1 < temp_y2:
                 valid_temp_box = True
-                st.success("✅ 坐标合法，图片浅色红框为实时预览")
+                st.success("✅ 坐标合法，图片浅红框实时预览")
             else:
-                st.error("❌ 坐标错误：左上数值必须小于右下")
+                valid_temp_box = False
+                st.error("❌ 左上数字必须小于右下，无预览框")
 
             st.divider()
             st.subheader("3. 单词信息录入")
@@ -222,6 +221,7 @@ else:
             clear_all_btn = st.button("🗑️ 清空本图全部热点")
             del_img_btn = st.button("🗑️ 删除当前图片")
 
+            # 保存热点逻辑
             if save_btn:
                 if not eng_word or not cn_mean:
                     st.warning("英文单词和中文释义不可为空！")
@@ -239,10 +239,8 @@ else:
                 del st.session_state.image_pool[selected_img]
                 gc.collect()
                 st.rerun()
-        else:
-            st.info("请先上传并选择一张图片，解锁坐标预览")
 
-    # 主预览图：粗红=已保存，浅红细线=实时预览
+    # 主预览区域：粗红永久热点 + 浅红实时预览框
     if img_name_list and selected_img:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -254,7 +252,7 @@ else:
             bx1, by1, bx2, by2 = item["box"]
             if bx1 < bx2 and by1 < by2:
                 draw.rectangle([bx1, by1, bx2, by2], outline="#ff0000", width=6)
-        # 实时预览浅红细框
+        # 实时浅红预览框
         if valid_temp_box:
             draw.rectangle([temp_x1, temp_y1, temp_x2, temp_y2], outline="#ff8888", width=2)
 
@@ -266,10 +264,10 @@ else:
             if len(hotspot_list) > 0:
                 del_idx = st.radio("选择删除", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
                 if st.button("删除该热点"):
-                    st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
+                    st.session_state.image_pool[selected_img].pop(del_idx)
                     st.rerun()
 
-    # 全套热点备份/恢复
+    # 全套热点备份/导入
     st.divider()
     st.subheader("全套热点备份/恢复")
     export_data = {}
