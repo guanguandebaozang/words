@@ -148,10 +148,14 @@ st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "a
 
 # 读取图片列表
 img_name_list = list(st.session_state.image_pool.keys())
-# 修复：自动选中新上传图片，上传后立刻显示
+# 自动匹配选中图片
 selected_img = st.session_state.current_img_name
 if img_name_list:
-    selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张）", img_name_list, index=img_name_list.index(selected_img) if selected_img in img_name_list else 0)
+    if selected_img in img_name_list:
+        idx = img_name_list.index(selected_img)
+    else:
+        idx = 0
+    selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张）", img_name_list, index=idx)
     st.session_state.current_img_name = selected_img
 
 # ========== 学生页面（无红框，原图正常展示） ==========
@@ -228,7 +232,7 @@ else:
                 progress_bar = st.progress(0)
                 total = len(upload_imgs)
                 success_count = 0
-                new_upload_name = ""  # 记录最新上传图片名，自动选中
+                new_upload_name = ""
                 fail_list = []
                 for idx, file in enumerate(upload_imgs):
                     progress_bar.progress((idx+1)/total, text=f"处理：{file.name}")
@@ -236,26 +240,24 @@ else:
                     if img is None:
                         fail_list.append(msg)
                         continue
+                    # 核心逻辑：同名只替换图片，保留原有热点
                     if file.name in st.session_state.image_pool:
-                        st.warning(f"{file.name} 已存在，跳过")
-                        del img
-                        gc.collect()
-                        continue
-                    # 先存入内存，再执行保存，不提前销毁img
-                    st.session_state.image_pool[file.name] = {"img": img, "hotspots": []}
+                        st.session_state.image_pool[file.name]["img"] = img
+                        st.info(f"{file.name}：已更新图片，原有热点保留")
+                    else:
+                        st.session_state.image_pool[file.name] = {"img": img, "hotspots": []}
                     success_count += 1
-                    new_upload_name = file.name  # 记录最新图片
+                    new_upload_name = file.name
                 progress_bar.empty()
                 for err in fail_list:
                     st.warning(err)
                 if success_count > 0:
-                    # 先更新选中图片为新图，再持久化，最后刷新
                     st.session_state.current_img_name = new_upload_name
                     save_all_data(st.session_state.image_pool)
-                    st.success(f"成功上传{success_count}张，自动切换至新图片！")
+                    st.success(f"成功处理{success_count}张，自动切换至最新图片！")
                     st.rerun()
                 else:
-                    st.info("无新增图片")
+                    st.info("无图片处理")
 
         st.divider()
         st.header("2. 热点坐标【实时预览】")
@@ -295,9 +297,11 @@ else:
                 if eng_word and cn_mean and valid_temp_box:
                     hot_data = {"box":[tx1,ty1,tx2,ty2],"word":eng_word,"phonetic":phonetic,"cn":cn_mean,"sentence":sentence}
                     st.session_state.image_pool[selected_img]["hotspots"].append(hot_data)
-                    save_all_data(st.session_state)
+                    save_all_data(st.session_state.image_pool)
                     st.success(f"【{eng_word}】保存成功")
                     st.rerun()
+                else:
+                    st.warning("英文/释义不能为空或坐标非法")
             if clear_all_btn:
                 st.session_state.image_pool[selected_img]["hotspots"] = []
                 save_all_data(st.session_state.image_pool)
@@ -307,7 +311,7 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 管理员预览画布（图片一定存在才渲染）
+    # 管理员预览画布
     if img_name_list and selected_img and selected_img in st.session_state.image_pool:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -315,25 +319,25 @@ else:
         tx1,ty1,tx2,ty2 = st.session_state.temp_x1, st.session_state.temp_y1, st.session_state.temp_x2, st.session_state.temp_y2
         valid_temp_box = tx1 < tx2 and ty1 < ty2
         canvas = origin_img.copy()
-        draw = ImageDraw.Draw(canvas)
+        draw = ImageDraw(canvas)
         # 已保存粗红框
         for item in hotspot_list:
             bx1,by1,bx2,by2 = item["box"]
             if bx1 < bx2 and by1 < by2:
                 draw.rectangle([bx1,by1,bx2,by2], outline="#ff0000", width=6)
-        # 实时浅红预览框
+        # 预览浅红框
         if valid_temp_box:
             draw.rectangle([tx1, ty1, tx2, ty2], outline="#ff8888", width=2)
         img_col, opt_col = st.columns([3,1])
         with img_col:
             val = streamlit_image_coordinates(canvas, key="coord_picker", use_column_width=True)
-            st.caption("粗红=已保存 | 浅红=实时预览｜点击两点框选区域")
+            st.caption("粗红=已保存 | 浅红=实时预览｜点击两点框选")
             if val is not None:
                 xc = round(val["x"])
                 yc = round(val["y"])
                 if st.session_state.pick_first is None:
                     st.session_state.pick_first = (xc, yc)
-                    st.info(f"已记录左上角({xc}, {yc})，请点击右下角")
+                    st.info(f"已拾取左上({xc},{yc})，再点右下角")
                 else:
                     x1,y1 = st.session_state.pick_first
                     st.session_state.temp_x1 = min(x1,xc)
@@ -344,6 +348,7 @@ else:
                     st.rerun()
             if st.button("🔄 重置坐标拾取"):
                 st.session_state.pick_first = None
+                st.rerun()
         with opt_col:
             st.subheader("热点管理")
             if len(hotspot_list) > 0:
