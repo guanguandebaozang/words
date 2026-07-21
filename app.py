@@ -7,26 +7,30 @@ import gc
 # 页面全局配置，侧边默认展开
 st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
 
-# 哈希加密函数【修复变量名错误】
+# 哈希加密函数（修复变量错误）
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# 图片压缩函数
-def compress_image(file_obj):
-    max_file_size = 8 * 1024 * 1024
-    if file_obj.size > max_file_size:
-        return None, "图片超过8MB限制，请压缩后重新上传"
-    raw_img = Image.open(file_obj).convert("RGB")
-    max_long_edge = 1200
-    w, h = raw_img.size
-    long_edge = max(w, h)
-    if long_edge > max_long_edge:
-        scale = max_long_edge / long_edge
-        new_w = int(w * scale)
-        new_h = int(h * scale)
-        raw_img = raw_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    return raw_img, "ok"
+# 图片压缩+安全加载，增加异常捕获、大小限制
+def load_and_compress(file_obj):
+    MAX_SIZE = 8 * 1024 * 1024
+    # 校验文件大小
+    if file.size > MAX_SIZE:
+        return None, f"文件{file.name}超过8MB限制，跳过"
+    try:
+        raw_img = Image.open(file_obj).convert("RGB")
+        max_long_edge = 1200
+        w, h = raw_img.size
+        long_edge = max(w, h)
+        if long_edge > max_long_edge:
+            scale = max_long_edge / long_edge
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            raw_img = raw_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        return raw_img, "ok"
+    except Exception as e:
+        return None, f"{file.name}图片损坏/格式不支持，跳过"
 
 # 读取云端Secrets
 try:
@@ -62,7 +66,7 @@ st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "a
 img_name_list = list(st.session_state.image_pool.keys())
 selected_img = ""
 if img_name_list:
-    selected_img = st.selectbox("选择场景图片", img_name_list)
+    selected_img = st.selectbox("选择场景图片（上传后重新点下拉刷新）", img_name_list)
     st.session_state.current_img_name = selected_img
 
 # ========== 游客学生页面 ==========
@@ -82,7 +86,7 @@ if st.session_state.view_mode == "visit":
         for item in hotspot_list:
             bx1, by1, bx2, by2 = item["box"]
             if bx1 < bx2 and by1 < by2:
-                draw.rectangle([bx1, by1, bx2, by2], outline="#ff0000", width=6)
+                draw.rectangle([bx1, by1, bx2], outline="#ff0000", width=6)
 
         st.image(canvas, caption="校园全景（红色粗框=单词学习热点）", use_column_width=True)
 
@@ -147,17 +151,16 @@ else:
         st.session_state.admin_name = ""
         st.rerun()
 
-    # 侧边栏
+    # 侧边栏上传区（核心修复上传阻塞问题）
     with st.sidebar:
         st.header("1. 批量上传场景图片")
-        st.info("单次最多8张，单张≤8MB，上传完成自动刷新页面")
+        st.info("单次最多8张，单张≤8MB，上传完成后点击上方下拉框刷新列表")
         upload_imgs = st.file_uploader(
             "支持jpg/png/jpeg，可多选",
             type=["jpg", "png", "jpeg"],
             accept_multiple_files=True,
             key="img_upload_key_fix"
         )
-        upload_finish = False
         if upload_imgs:
             if len(upload_imgs) > 8:
                 st.error("单次最多上传8张图片，请分批次上传！")
@@ -165,11 +168,12 @@ else:
                 progress_bar = st.progress(0)
                 total = len(upload_imgs)
                 success_count = 0
+                # 移除循环内st.rerun，不再阻塞上传
                 for idx, file in enumerate(upload_imgs):
                     progress_bar.progress((idx + 1) / total, text=f"处理：{file.name}")
-                    img, msg = compress_image(file)
+                    img, msg = load_and_compress(file)
                     if img is None:
-                        st.warning(f"{file.name}：{msg}，跳过该文件")
+                        st.warning(msg)
                         continue
                     if file.name not in st.session_state.image_pool:
                         st.session_state.image_pool[file.name] = {"img": img, "hotspots": []}
@@ -178,10 +182,9 @@ else:
                     gc.collect()
                 progress_bar.empty()
                 if success_count > 0:
-                    st.success(f"成功上传{success_count}张！页面自动刷新")
-                    upload_finish = True
-        if upload_finish:
-            st.rerun()
+                    st.success(f"成功上传{success_count}张！请点击上方下拉框刷新图片列表")
+                else:
+                    st.info("无新增图片，全部超限/损坏被跳过")
 
         st.divider()
         st.header("2. 热点坐标设置【实时预览】")
@@ -245,7 +248,7 @@ else:
         origin_img = current_data["img"]
         hotspot_list = current_data["hotspots"]
         canvas = origin_img.copy()
-        draw = ImageDraw.Draw(canvas)
+        draw = ImageDraw(canvas)
         # 已保存粗红框
         for item in hotspot_list:
             bx1, by1, bx2, by2 = item["box"]
@@ -263,7 +266,7 @@ else:
             if len(hotspot_list) > 0:
                 del_idx = st.radio("选择删除", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
                 if st.button("删除该热点"):
-                    st.session_state.image_pool[selected_img].pop(del_idx)
+                    st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
                     st.rerun()
 
     # 全套热点备份/恢复
