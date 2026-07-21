@@ -5,7 +5,7 @@ import bcrypt
 
 st.set_page_config(page_title="🏫校园场景点读学英语", layout="wide")
 
-# 工具：逐层把只读 Secrets 转为标准 dict，无递归溢出
+# 工具：逐层转换Secrets为标准字典，无只读报错
 def secret_to_dict(raw_obj):
     if hasattr(raw_obj, "items"):
         new_d = {}
@@ -14,7 +14,7 @@ def secret_to_dict(raw_obj):
         return new_d
     return raw_obj
 
-# 强制读取云端 Secrets（满足必须读取secret要求）
+# 强制读取云端Secrets（满足必须读取secret要求）
 raw_creds = st.secrets["credentials"]
 creds = secret_to_dict(raw_creds)
 
@@ -32,30 +32,7 @@ if "is_admin" not in st.session_state:
 if "admin_name" not in st.session_state:
     st.session_state.admin_name = ""
 
-# 登录表单（原生bcrypt校验，无第三方鉴权库）
-if not st.session_state.is_admin:
-    st.subheader("🔐 管理员登录验证")
-    with st.form("login_form"):
-        username = st.text_input("用户名")
-        password = st.text_input("密码", type="password")
-        submit = st.form_submit_button("登录")
-        if submit:
-            user_info = creds["usernames"].get(username)
-            if user_info:
-                # bcrypt校验密码
-                hash_pw = user_info["password"].encode("utf-8")
-                input_pw = password.encode("utf-8")
-                if bcrypt.checkpw(input_pw, hash_pw):
-                    st.session_state.is_admin = True
-                    st.session_state.admin_name = user_info["name"]
-                    st.rerun()
-                else:
-                    st.error("密码错误")
-            else:
-                st.error("用户名不存在")
-    st.stop()
-
-# 页面顶部切换
+# 页面顶部标题与切换（游客页直接可用，不受登录限制）
 st.title("🏫 校园实景热点点读英语学习平台")
 st.divider()
 col_switch1, col_switch2 = st.columns([1, 4])
@@ -63,17 +40,17 @@ with col_switch1:
     page_choose = st.radio("页面入口", ["学生学习页", "管理员后台"])
 st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "admin"
 
-# ========== 学生公开学习页（所有人可访问，仅浏览朗读） ==========
+# ===================== 学生游客页面（无需登录，所有人直接访问） =====================
 if st.session_state.view_mode == "visit":
-    st.subheader("📖 学生学习专区")
-    st.info("仅查看单词、浏览器语音朗读，无编辑上传权限")
+    st.subheader("📖 学生学习专区（游客无需登录）")
+    st.info("外网访客直接浏览、浏览器语音朗读，无任何编辑权限")
 
     if st.session_state.bg_img is None:
         st.warning("管理员尚未上传校园场景图片与单词热点，请稍后再来！")
     else:
         st.image(st.session_state.draw_canvas, caption="校园全景（红色方框=单词学习热点）", use_column_width=True)
         if len(st.session_state.hotspot_list) == 0:
-            st.warning("暂无校园英语词汇")
+            st.warning("管理员暂未录入校园英语词汇")
         else:
             hot_idx = st.radio("选择校园物品学习", range(len(st.session_state.hotspot_list)),
                                format_func=lambda i: st.session_state.hotspot_list[i]["word"])
@@ -84,7 +61,7 @@ if st.session_state.view_mode == "visit":
             st.markdown(f"中文释义：{word_info['cn']}")
             st.markdown(f"校园例句：{word_info['sentence']}")
 
-            # 前端Web Speech朗读JS
+            # 前端Web Speech朗读（云端手机/电脑通用）
             speak_js = f"""
             <script>
                 function readWord() {{
@@ -106,13 +83,35 @@ if st.session_state.view_mode == "visit":
             with b2:
                 st.button("🔊 朗读例句", on_click=lambda: st.components.v1.html("<script>readSentence()</script>", height=0))
 
-# ========== 管理员后台（登录后解锁编辑） ==========
+# ===================== 管理员后台（仅切换到此页面才需要登录 =====================
 else:
+    # 未登录则弹出登录表单，不拦截游客页面
+    if not st.session_state.is_admin:
+        st.subheader("🔐 管理员登录验证")
+        with st.form("login_form"):
+            username = st.text_input("用户名")
+            password = st.text_input("密码", type="password")
+            submit = st.form_submit_button("登录")
+            if submit:
+                user_info = creds["usernames"].get(username)
+                if user_info:
+                    hash_pw = user_info["password"].encode("utf-8")
+                    input_pw = password.encode("utf-8")
+                    if bcrypt.checkpw(input_pw, hash_pw):
+                        st.session_state.is_admin = True
+                        st.session_state.admin_name = user_info["name"]
+                        st.rerun()
+                    else:
+                        st.error("密码错误")
+                else:
+                    st.error("用户名不存在")
+        st.stop()
+
+    # 登录成功，显示完整编辑后台
     st.subheader("🔐 管理员单词配置后台")
     st.success(f"欢迎管理员 {st.session_state.admin_name}")
     if st.button("退出登录"):
         st.session_state.is_admin = False
-        st.session_state.admin_name = ""
         st.rerun()
 
     # 侧边编辑区
@@ -123,7 +122,7 @@ else:
             st.session_state.bg_img = Image.open(upload_img).convert("RGB")
             st.session_state.draw_canvas = st.session_state.bg_img.copy()
             st.session_state.hotspot_list = []
-            st.success("图片加载完成，可配置单词热点")
+            st.success("校园图片加载完成，可配置单词热点")
 
         st.divider()
         st.header("2. 热点坐标设置")
@@ -191,7 +190,7 @@ else:
                     draw.rectangle(item["box"], outline="red", width=3)
                 st.rerun()
 
-    # 单词配置导入导出
+    # 单词配置导入导出（云端务必备份）
     st.divider()
     st.subheader("单词库保存/导入")
     if len(st.session_state.hotspot_list) > 0:
@@ -206,7 +205,7 @@ else:
             draw = ImageDraw.Draw(st.session_state.draw_canvas)
             for item in st.session_state.hotspot_list:
                 draw.rectangle(item["box"], outline="red", width=3)
-        st.success("单词配置导入完成！切换学生页即可分享学习")
+        st.success("单词配置导入完成，切换学生页即可分享学习")
 
 # 校园高频词汇模板
 with st.expander("📚 校园英语词汇模板（管理员直接复制）"):
