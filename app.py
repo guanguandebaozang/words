@@ -12,7 +12,7 @@ def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
     return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# 图片压缩+大小校验，修复变量名错误
+# 图片压缩函数（修复变量名raw_img）
 def compress_image(file_obj):
     max_file_size = 8 * 1024 * 1024
     if file_obj.size > max_file_size:
@@ -36,7 +36,7 @@ except Exception as e:
     st.error("读取后台密钥失败，请检查Streamlit Secrets配置！")
     st.stop()
 
-# 会话状态统一初始化
+# 会话初始化
 def init_session():
     if "image_pool" not in st.session_state:
         st.session_state.image_pool = {}
@@ -50,7 +50,7 @@ def init_session():
         st.session_state.admin_name = ""
 init_session()
 
-# 页面顶部切换
+# 顶部页面切换
 st.title("🏫 沉浸式情景点读英语学习平台")
 st.divider()
 col_switch1, col_switch2 = st.columns([1, 4])
@@ -58,14 +58,14 @@ with col_switch1:
     page_choose = st.radio("页面入口", ["学生学习页", "管理员后台"])
 st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "admin"
 
-# 图片下拉选择器（全局共用）
+# 全局图片下拉选择
 img_name_list = list(st.session_state.image_pool.keys())
 selected_img = ""
 if img_name_list:
     selected_img = st.selectbox("选择场景图片", img_name_list)
     st.session_state.current_img_name = selected_img
 
-# ========== 游客学生页面（免登录） ==========
+# ========== 游客学生页面 ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
     st.info("仅浏览单词、浏览器语音朗读，无任何编辑上传权限，有任何需求可联系关关 VX：lgln11,QQ:'2603970758'")
@@ -146,10 +146,10 @@ else:
         st.session_state.admin_name = ""
         st.rerun()
 
-    # 侧边编辑区
+    # 侧边栏：上传 + 热点配置（固定显示，有图才解锁输入框）
     with st.sidebar:
         st.header("1. 批量上传场景图片")
-        st.info("单次最多8张，单张≤8MB，大图自动压缩，上传完成切换下拉框查看")
+        st.info("单次最多8张，单张≤8MB，大图自动压缩，上传后切换上方下拉框")
         upload_imgs = st.file_uploader(
             "支持jpg/png/jpeg，可多选",
             type=["jpg", "png", "jpeg"],
@@ -184,10 +184,11 @@ else:
                     st.info("无新增图片或全部图片超限被跳过")
 
         st.divider()
+        st.header("2. 热点配置区域")
+        # 有选中图片才展示坐标、单词输入
         if img_name_list and selected_img:
             current_data = st.session_state.image_pool[selected_img]
-            w, h = current_data["img"]
-            st.header("2. 热点坐标设置（X1<X2，Y1<Y2）")
+            w, h = current_data["img"].size
             c1, c2 = st.columns(2)
             with c1:
                 x1 = st.number_input("左上角 X", min_value=0, max_value=w, value=30)
@@ -197,18 +198,19 @@ else:
                 y2 = st.number_input("右下角 Y", min_value=0, max_value=h, value=150)
 
             st.divider()
-            st.header("3. 单词信息录入")
+            st.subheader("单词信息录入")
             eng_word = st.text_input("英文单词")
             phonetic = st.text_input("国际音标")
             cn_mean = st.text_input("中文释义")
             sentence = st.text_input("校园例句")
 
             st.divider()
-            st.header("4. 操作按钮")
+            st.subheader("操作按钮")
             save_btn = st.button("✅ 保存当前热点")
             clear_all_btn = st.button("🗑️ 清空本图全部热点")
             del_img_btn = st.button("🗑️ 删除当前这张图片")
 
+            # 保存热点
             if save_btn:
                 if not eng_word or not cn_mean:
                     st.warning("英文单词和中文释义不可为空！")
@@ -223,19 +225,19 @@ else:
                     st.session_state.image_pool[selected_img]["hotspots"].append(hot_data)
                     st.success(f"热点【{eng_word}】添加成功！")
                     st.rerun()
-
+            # 清空本图热点
             if clear_all_btn:
                 st.session_state.image_pool[selected_img]["hotspots"] = []
                 st.rerun()
-
+            # 删除图片
             if del_img_btn:
                 del st.session_state.image_pool[selected_img]
                 gc.collect()
                 st.rerun()
         else:
-            st.info("请先上传图片再配置热点")
+            st.info("请先上传并选择一张图片，再配置热点")
 
-    # 主区域图片预览 + 热点删除面板
+    # 主页面：图片预览 + 热点删除面板
     if img_name_list and selected_img:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -256,10 +258,11 @@ else:
                 del_idx = st.radio("选择删除单词", range(len(hotspot_list)),
                                    format_func=lambda i: hotspot_list[i]["word"])
                 if st.button("删除该热点"):
-                    st.session_state.image_pool[selected_img].pop(del_idx)
+                    # 修复之前BUG：hotspots数组.pop()
+                    st.session_state.image_pool[selected_img]["hotspots"].pop(del_idx)
                     st.rerun()
 
-    # 全套热点备份/导入
+    # 全局热点备份导入导出
     st.divider()
     st.subheader("全套图片热点备份/恢复")
     export_data = {}
