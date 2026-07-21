@@ -4,7 +4,7 @@ import json
 import hashlib
 import gc
 
-st.set_page_config(page_title="🏫校园实景热点点读英语", layout="wide")
+st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide")
 
 # 哈希加密工具
 def get_pwd_hash(raw_str):
@@ -44,7 +44,7 @@ if "admin_name" not in st.session_state:
     st.session_state.admin_name = ""
 
 # 页面顶部切换
-st.title("🏫 校园实景热点点读英语学习平台")
+st.title("🏫 沉浸式情景点读英语学习平台")
 st.divider()
 col_switch1, col_switch2 = st.columns([1, 4])
 with col_switch1:
@@ -61,7 +61,7 @@ if img_name_list:
 # ========== 游客学生页面（免登录） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
-    st.info("仅浏览单词、浏览器语音朗读，无任何编辑上传权限")
+    st.info("仅浏览单词、浏览器语音朗读，无任何编辑上传权限，有任何需求可联系关关 VX：lgln11,QQ:"2603970758)
 
     if not img_name_list:
         st.warning("管理员尚未上传校园场景图片，请稍后再来！")
@@ -143,14 +143,13 @@ else:
     with st.sidebar:
         st.header("1. 批量上传场景图片")
         st.info("单次最多上传8张，大图自动压缩，避免页面卡死")
+        # 移除报错参数 clear_on_submit=True
         upload_imgs = st.file_uploader(
             "支持jpg/png/jpeg，可多选",
             type=["jpg", "png", "jpeg"],
-            accept_multiple_files=True,
-            clear_on_submit=True
+            accept_multiple_files=True
         )
         if upload_imgs:
-            # 限制最大上传数量
             if len(upload_imgs) > 8:
                 st.error("单次最多上传8张图片，请分批次上传！")
             else:
@@ -160,16 +159,13 @@ else:
                 for idx, file in enumerate(upload_imgs):
                     progress_bar.progress((idx + 1) / total, text=f"正在处理：{file.name}")
                     if file.name not in st.session_state.image_pool:
-                        # 读取并压缩图片
                         raw_img = Image.open(file).convert("RGB")
                         small_img = compress_image(raw_img)
-                        # 存入内存
                         st.session_state.image_pool[file.name] = {
                             "img": small_img,
                             "hotspots": []
                         }
                         success_count += 1
-                        # 释放原始大图内存
                         del raw_img
                         gc.collect()
                 progress_bar.empty()
