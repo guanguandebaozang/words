@@ -25,15 +25,15 @@ except Exception:
 
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
-    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
+    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest
 
-# PIL图片转纯base64
+# PIL图片转纯base64（修复pil未定义错误）
 def img_to_b64(pil_img):
     if pil_img is None:
         return None
     try:
         buf = BytesIO()
-        pil.save(buf, format="JPEG", quality=80)
+        pil_img.save(buf, format="JPEG", quality=80)
         res = base64.b64encode(buf.getvalue()).decode("utf-8")
         buf.close()
         return res
@@ -320,7 +320,8 @@ else:
             with c2:
                 st.session_state.temp_x2 = st.number_input("右下角 X", min_value=0, max_value=img_w, value=temp_x2, key="tx2")
                 st.session_state.temp_y2 = st.number_input("右下角 Y", min_value=0, max_value=img_h, value=temp_y2, key="ty2")
-            tx1,ty1,tx2,ty2 = st.session_state.temp_x1, st.session_state.temp_y1, st.session_state.temp_x2, st.session_state.temp_y2
+            tx1,ty1,tx2 = st.session_state.temp_x1, st.session_state.temp_y1, st.session_state.temp_x2
+            ty2 = st.session_state.temp_y2
             if tx1 < tx2 and ty1 < ty2:
                 valid_temp_box = True
                 st.success("坐标正常")
