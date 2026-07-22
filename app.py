@@ -75,7 +75,7 @@ def load_and_compress(file_obj):
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
 
-# 【修复dump fp报错】标准文件写入
+# 安全持久化，修复dump fp缺失报错
 def save_all_data(pool):
     try:
         dump_data = {}
@@ -237,7 +237,7 @@ else:
                     if img is None:
                         fail_list.append(msg)
                         continue
-                    # 同名仅更新图片，保留原有热点
+                    # 同名仅替换图片，保留热点
                     if file.name in st.session_state.image_pool:
                         st.session_state.image_pool[file.name]["img"] = img
                         st.info(f"{file.name}：已更新图片，原有热点保留")
@@ -261,8 +261,8 @@ else:
         temp_y1 = st.session_state.temp_y1
         temp_x2 = st.session_state.temp_x2
         temp_y2 = st.session_state.temp_y2
+        img_w, img_h = 0, 0  # 修复：正确双变量赋值
         valid_temp_box = False
-        img_w, img_h = 0
         if len(img_name_list) > 0:
             current_data = st.session_state.image_pool[selected_img]
             origin_img = current_data["img"]
@@ -309,7 +309,7 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 管理员预览画布 + 【修复双轴独立缩放，坐标完全对齐】
+    # 管理员预览画布 + 双轴独立坐标换算（拾取/输入框完全对齐）
     if img_name_list and selected_img and selected_img in st.session_state.image_pool:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -323,7 +323,7 @@ else:
         for item in hotspot_list:
             bx1,by1,bx2,by2 = item["box"]
             if bx1 < bx2 and by1 < by2:
-                draw.rectangle([bx1,by1,bx2], outline="#ff0000", width=6)
+                draw.rectangle([bx1,by1,bx2,by2], outline="#ff0000", width=6)
         # 实时浅红预览框
         if valid_temp_box:
             draw.rectangle([tx1, ty1, tx2, ty2], outline="#ff8888", width=2)
@@ -331,12 +331,9 @@ else:
         img_col, opt_col = st.columns([3,1])
         with img_col:
             display_w = 900
-            # 计算画布真实高度，保证等比例不拉伸
             display_h = display_w * orig_h / orig_w
-            # 双独立缩放比例，彻底解决Y轴错位
             scale_x = orig_w / display_w
             scale_y = orig_h / display_h
-
             val = streamlit_image_coordinates(
                 canvas,
                 width=display_w,
@@ -346,7 +343,6 @@ else:
             if val is not None:
                 scr_x = val["x"]
                 scr_y = val["y"]
-                # 分开换算X/Y原图像素
                 real_x = round(scr_x * scale_x)
                 real_y = round(scr_y * scale_y)
 
@@ -368,11 +364,13 @@ else:
             if len(hotspot_list) > 0:
                 del_idx = st.radio("选择删除", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
                 if st.button("删除该热点"):
-                    st.session_state.image_pool.pop(del_idx)
+                    st.session_state.image_pool[selected_img].pop(del_idx)
                     save_all_data(st.session_state.image_pool)
                     st.rerun()
             else:
                 st.info("暂无热点可删除")
+    else:
+        st.info("请从上方下拉框选择图片后预览")
 
     # 热点导入导出
     st.divider()
@@ -388,7 +386,7 @@ else:
         match_count = 0
         for img_name, hotspots in load_data.items():
             if img_name in st.session_state.image_pool:
-                st.session_state.image_pool["hotspots"] = hotspots
+                st.session_state.image_pool[img_name]["hotspots"] = hotspots
                 match_count += 1
         save_all_data(st.session_state.image_pool)
         st.success(f"匹配{match_count}张图片热点恢复完成")
