@@ -25,15 +25,15 @@ except Exception:
 
 def get_pwd_hash(raw_str):
     clean_str = raw_str.strip()
-    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest
+    return hashlib.sha256(clean_str.encode("utf-8")).hexdigest()
 
-# PIL图片转纯base64（修复pil未定义错误）
+# PIL图片转纯base64
 def img_to_b64(pil_img):
     if pil_img is None:
         return None
     try:
         buf = BytesIO()
-        pil_img.save(buf, format="JPEG", quality=80)
+        pil.save(buf, format="JPEG", quality=80)
         res = base64.b64encode(buf.getvalue()).decode("utf-8")
         buf.close()
         return res
@@ -265,13 +265,21 @@ else:
         st.session_state.admin_name = ""
         st.rerun()
 
-    with st.sidebar:
-        st.header("批量上传图片")
-        st.info(f"图片总数：{len(img_name_list)} | 单次最多8张")
-        upload_imgs = st.file_uploader("jpg/png/jpeg", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="img_upload_key_fix")
-        if upload_imgs:
+  with st.sidebar:
+    st.header("1. 批量上传图片")
+    st.info(f"当前图片总数：{len(img_name_list)} | 单次≤8张，单张≤8MB")
+    # 新增session标记，避免重复处理同一批文件
+    if "upload_processed" not in st.session_state:
+        st.session_state.upload_processed = ""
+    upload_imgs = st.file_uploader("支持jpg/png/jpeg，可多选", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="img_upload_key_fix")
+    if upload_imgs:
+        # 用文件名拼接作为标识，防止循环重复执行
+        file_key = ",".join([f.name for f in upload_imgs])
+        if file_key == st.session_state.upload_processed:
+            st.info("文件已处理，下拉框切换图片即可")
+        else:
             if len(upload_imgs) > 8:
-                st.error("单次不能超过8张！")
+                st.error("单次最多8张！")
             else:
                 progress_bar = st.progress(0)
                 total = len(upload_imgs)
@@ -279,14 +287,14 @@ else:
                 new_upload_name = ""
                 fail_list = []
                 for idx, file in enumerate(upload_imgs):
-                    progress_bar.progress((idx+1)/total, text=f"处理 {file.name}")
+                    progress_bar.progress((idx+1)/total, text=f"处理：{file.name}")
                     img, msg = load_and_compress(file)
                     if img is None:
                         fail_list.append(msg)
                         continue
+                    # 同名图片覆盖提示
                     if file.name in st.session_state.image_pool:
-                        st.session_state.image_pool[file.name]["img"] = img
-                        st.info(f"{file.name} 更新完成，热点保留")
+                        st.info(f"{file.name}：已更新图片，原有热点保留")
                     else:
                         st.session_state.image_pool[file.name] = {"img": img, "hotspots": []}
                     success_count += 1
@@ -297,9 +305,10 @@ else:
                 if success_count > 0:
                     st.session_state.current_img_name = new_upload_name
                     save_all_data(st.session_state.image_pool)
-                    st.success(f"成功{success_count}张，上方下拉切换图片即可编辑")
+                    st.session_state.upload_processed = file_key
+                    st.success(f"成功处理{success_count}张，请上方下拉框切换新图片查看")
                 else:
-                    st.info("无新增图片")
+                    st.info("无图片处理")
 
         st.divider()
         st.header("热点坐标设置")
@@ -320,8 +329,7 @@ else:
             with c2:
                 st.session_state.temp_x2 = st.number_input("右下角 X", min_value=0, max_value=img_w, value=temp_x2, key="tx2")
                 st.session_state.temp_y2 = st.number_input("右下角 Y", min_value=0, max_value=img_h, value=temp_y2, key="ty2")
-            tx1,ty1,tx2 = st.session_state.temp_x1, st.session_state.temp_y1, st.session_state.temp_x2
-            ty2 = st.session_state.temp_y2
+            tx1,ty1,tx2,ty2 = st.session_state.temp_x1, st.session_state.temp_y1, st.session_state.temp_x2, st.session_state.temp_y2
             if tx1 < tx2 and ty1 < ty2:
                 valid_temp_box = True
                 st.success("坐标正常")
