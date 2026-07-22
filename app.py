@@ -5,15 +5,13 @@ from io import BytesIO
 from PIL import Image
 import os
 
-# 线下更新专用数据文件
+# 线下更新数据文件
 DATA_FILE = "data_backup.json"
 
-# 页面基础配置
 st.set_page_config(page_title="英语情景点读-学生端", layout="wide")
 
-# base64转图片（增加异常捕获，损坏直接返回None）
 def b64_to_img(b64_str):
-    if not b64_str or not isinstance(b64_str, str):
+    if not b64 or not isinstance(b64_str, str):
         return None
     try:
         raw_bytes = base64.b64decode(b64_str)
@@ -24,7 +22,6 @@ def b64_to_img(b64_str):
     except Exception:
         return None
 
-# 图片转base64
 def img_to_b64(pil_img):
     buf = BytesIO()
     pil_img.save(buf, format="JPEG", quality=80)
@@ -32,7 +29,7 @@ def img_to_b64(pil_img):
     buf.close()
     return res
 
-# 内置标准调试示例（永远可用兜底图）
+# 标准示例数据（兜底专用）
 def get_demo_data():
     w, h = 800, 600
     demo_img = Image.new("RGB", (w, h), color=(240, 248, 255))
@@ -59,64 +56,59 @@ def get_demo_data():
         }
     }
 
-# 加载数据：过滤损坏图片，只保留正常图片
+# 加载并过滤损坏图片
 def load_scene_data():
-    demo = get_demo_data()
+    demo_pool = get_demo_data()
     if not os.path.exists(DATA_FILE):
-        return demo
+        return demo_pool
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            raw_json = json.load(f)
-        valid_pool = {}
-        for img_name, data in raw_json.items():
-            b64_text = data.get("img_b64", "")
-            img = b64_to_img(b64_text)
-            if img is not None:
-                valid_pool[img_name] = {
-                    "img": img,
-                    "hotspots": data.get("hotspots", [])
+            raw = json.load(f)
+        valid_data = {}
+        for name, item in raw.items():
+            b64_txt = item.get("img_b64", "")
+            img_obj = b64_to_img(b64_txt)
+            if img_obj:
+                valid_data[name] = {
+                    "img": img_obj,
+                    "hotspots": item.get("hotspots", [])
                 }
-        # 如果所有图片全部损坏，返回示例
-        if len(valid_pool) == 0:
-            return demo
-        return valid_pool
+        if len(valid_data) == 0:
+            return demo_pool
+        return valid_data
     except Exception:
-        return demo
+        return demo_pool
 
-# 加载有效场景数据
+# 加载全部有效场景
 scene_pool = load_scene_data()
+demo_full = get_demo_data()
+demo_item = demo_full["demo_test.jpg"]
 
-# 页面标题
 st.title("沉浸式英语情景点读")
 st.divider()
 
-img_name_list = list(scene_pool.keys())
-select_img = st.selectbox("选择学习场景", img_name_list)
-scene_info = scene_pool[select_img]
+img_names = list(scene_pool.keys())
+select_name = st.selectbox("选择学习场景", img_names)
+current_item = scene_pool[select_name]
 
-# 安全读取图片与热点
-origin_img = scene_info.get("img")
-hotspot_list = scene_info.get("hotspots", [])
+# 【关键修复】不用直接["img"]，使用get安全获取
+origin_img = current_item.get("img")
+hotspot_list = current_item.get("hotspots", [])
 
-# 图片损坏兜底切换示例
+# 图片损坏则强制使用示例
 if origin_img is None:
     st.error("当前图片数据损坏，自动切换至调试示例图，请运维更新data_backup.json文件")
-    # 强制使用示例图
-    demo_pool = get_demo_data()
-    scene_info = demo_pool["demo_test.jpg"]
-    origin_img = scene_info["img"]
-    hotspot_list = scene_info["hotspots"]
+    origin_img = demo_item.get("img")
+    hotspot_list = demo_item.get("hotspots", [])
 
+# 渲染图片
 orig_w, orig_h = origin_img.size
-
-# 渲染图片base64
 buf = BytesIO()
 origin_img.save(buf, format="JPEG", quality=80)
 img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 buf.close()
 hot_json = json.dumps(hotspot_list, ensure_ascii=False)
 
-# 前端朗读悬浮层HTML
 html_code = f"""
 <script>
 function speakWord(text) {{
@@ -163,7 +155,7 @@ window.onload = function(){{
 """
 st.components.v1.html(html_code, height=int(orig_h * 0.72))
 
-# 单词朗读区域
+# 词汇区域
 if len(hotspot_list) == 0:
     st.info("该场景暂无标注词汇")
 else:
@@ -182,6 +174,5 @@ else:
     with b2:
         st.button("🔊朗读例句", on_click=lambda: st.markdown(f'<script>speakSentence("{s_text}")</script>', unsafe_allow_html=True))
 
-# 底部更新说明（无网页上传功能）
 st.divider()
-st.info("更新说明：线下使用管理端导出完整data_backup.json，替换项目仓库内同名文件后重新部署应用即可修复损坏图片。")
+st.info("更新说明：线下生成完整data_backup.json，替换仓库文件后重新部署即可修复图片损坏问题。")
