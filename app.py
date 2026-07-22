@@ -12,9 +12,9 @@ import os
 # 持久化文件
 DATA_FILE = "data_backup.json"
 # 页面全局配置
-st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="沉浸式情景点读英语", layout="wide", initial_sidebar_state="expanded")
 
-# ========= 登录配置 账号admin 密码school2026 =========
+# 登录配置
 ADMIN_USER = "admin"
 ADMIN_HASH = "136b43316a034960977810162f20453048272412252d4b48f819d353f040928e"
 try:
@@ -33,7 +33,7 @@ def img_to_b64(pil_img):
         return None
     try:
         buf = BytesIO()
-        pil_img.save(buf, format="JPEG", quality=80)
+        pil.save(buf, format="JPEG", quality=80)
         res = base64.b64encode(buf.getvalue()).decode("utf-8")
         buf.close()
         return res
@@ -60,22 +60,23 @@ def load_and_compress(file_obj):
         return None, f"【失败】{file_obj.name} 超过8MB限制"
     try:
         raw_img = Image.open(file_obj).convert("RGB")
-        max_long_edge = 1200
         w, h = raw_img.size
+        max_long_edge = 1200
         long_edge = max(w, h)
         if long_edge > max_long_edge:
             scale = max_long_edge / long_edge
             new_w = int(w * scale)
             new_h = int(h * scale)
             try:
-                raw_img = raw_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                resize_filter = Image.Resampling.LANCZOS
             except AttributeError:
-                raw_img = raw_img.resize((new_w, Image.ANTIALIAS))
+                resize_filter = Image.ANTIALIAS
+            raw_img = raw_img.resize((new_w, new_h), resize_filter)
         return raw_img, "ok"
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
 
-# 安全持久化，修复dump fp报错
+# 安全持久化
 def save_all_data(pool):
     try:
         dump_data = {}
@@ -114,7 +115,7 @@ def load_all_data():
     except Exception:
         return {}
 
-# 会话初始化（统一变量current_img_name）
+# 会话初始化
 def init_session():
     if "image_pool" not in st.session_state:
         st.session_state.image_pool = load_all_data()
@@ -139,7 +140,7 @@ def init_session():
 init_session()
 
 # 页面标题
-st.title("🏫 沉浸式情景点读英语学习平台")
+st.title("沉浸式情景点读英语")
 st.divider()
 col_switch1, col_switch2 = st.columns([1, 4])
 with col_switch1:
@@ -156,9 +157,9 @@ if img_name_list:
     selected_img = st.selectbox(f"选择场景（共{len(img_name_list)}张）", img_name_list, index=idx)
     st.session_state.current_img_name = selected_img
 
-# ========== 学生页面（修复NameError、悬浮提示、点击朗读、按钮发声） ==========
+# 学生页面
 if st.session_state.view_mode == "visit":
-    st.subheader("📖 学生学习专区（游客无需登录）")
+    st.subheader("学生学习专区（游客无需登录）")
     st.info("鼠标悬停查看单词，点击区域自动朗读")
     if not img_name_list:
         st.warning("管理员尚未上传图片，请稍后再来！")
@@ -168,11 +169,9 @@ if st.session_state.view_mode == "visit":
         hotspot_list = current_data["hotspots"]
         orig_w, orig_h = origin_img.size
 
-        # 修复：变量提前定义，消除NameError
         img_b64 = img_to_b64(origin_img)
         hot_json = json.dumps(hotspots, ensure_ascii=False)
 
-        # 修复HTML标签错乱，完整闭合
         html_code = f"""
 <script>
 function speakWord(text) {{
@@ -233,14 +232,14 @@ window.onload = function(){{
 
             b1, b2 = st.columns(2)
             with b1:
-                st.button("🔊 朗读单词", on_click=lambda: st.markdown(f'<script>speakWord("{w_text}")</script>', unsafe_allow_html=True))
+                st.button("朗读单词", on_click=lambda: st.markdown(f'<script>speakWord("{w_text}")</script>', unsafe_allow_html=True))
             with b2:
-                st.button("🔊 朗读例句", on_click=lambda: st.markdown(f'<script>speakSentence("{s_text}")</script>', unsafe_allow_html=True))
+                st.button("朗读例句", on_click=lambda: st.markdown(f'<script>speakSentence("{s_text}")</script>', unsafe_allow_html=True))
 
-# ========== 管理员后台（上传不自动刷新，无需重登） ==========
+# 管理员后台
 else:
     if not st.session_state.is_admin:
-        st.subheader("🔐 管理员登录")
+        st.subheader("管理员登录")
         with st.form("login_form"):
             username_input = st.text_input("用户名")
             password_input = st.text_input("密码", type="password")
@@ -259,7 +258,7 @@ else:
                     st.error("密码错误")
         st.stop()
 
-    st.subheader("🔐 管理员后台")
+    st.subheader("管理员后台")
     st.success(f"欢迎 {st.session_state.admin_name}")
     if st.button("退出登录"):
         st.session_state.is_admin = False
@@ -267,7 +266,7 @@ else:
         st.rerun()
 
     with st.sidebar:
-        st.header("1. 批量上传图片")
+        st.header("批量上传图片")
         st.info(f"图片总数：{len(img_name_list)} | 单次最多8张")
         upload_imgs = st.file_uploader("jpg/png/jpeg", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="img_upload_key_fix")
         if upload_imgs:
@@ -285,7 +284,6 @@ else:
                     if img is None:
                         fail_list.append(msg)
                         continue
-                    # 同名图只替换图片，保留热点
                     if file.name in st.session_state.image_pool:
                         st.session_state.image_pool[file.name]["img"] = img
                         st.info(f"{file.name} 更新完成，热点保留")
@@ -299,13 +297,12 @@ else:
                 if success_count > 0:
                     st.session_state.current_img_name = new_upload_name
                     save_all_data(st.session_state.image_pool)
-                    # 关键：移除上传rerun，不用重新登录
                     st.success(f"成功{success_count}张，上方下拉切换图片即可编辑")
                 else:
                     st.info("无新增图片")
 
         st.divider()
-        st.header("2. 热点坐标设置")
+        st.header("热点坐标设置")
         temp_x1 = st.session_state.temp_x1
         temp_y1 = st.session_state.temp_y1
         temp_x2 = st.session_state.temp_x2
@@ -330,16 +327,16 @@ else:
             else:
                 st.error("左上数值要小于右下")
             st.divider()
-            st.subheader("3. 单词信息")
+            st.subheader("单词信息")
             eng_word = st.text_input("英文单词", key="word_in")
             phonetic = st.text_input("国际音标", key="phon_in")
             cn_mean = st.text_input("中文释义", key="cn_in")
             sentence = st.text_input("例句", key="sent_in")
             st.divider()
-            st.subheader("4. 操作")
-            save_btn = st.button("✅ 保存热点")
-            clear_all_btn = st.button("🗑️ 清空本图热点")
-            del_img_btn = st.button("🗑️ 删除当前图片")
+            st.subheader("操作")
+            save_btn = st.button("保存热点")
+            clear_all_btn = st.button("清空本图热点")
+            del_img_btn = st.button("删除当前图片")
             if save_btn:
                 if eng_word and cn_mean and valid_temp_box:
                     hot_data = {"box":[tx1,ty1,tx2,ty2],"word":eng_word,"phonetic":phonetic,"cn":cn_mean,"sentence":sentence}
@@ -358,7 +355,7 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 管理员画布（坐标换算对齐）
+    # 管理员画布
     if img_name_list and selected_img and selected_img in st.session_state.image_pool:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -368,12 +365,10 @@ else:
         valid_temp_box = tx1 < tx2 and ty1 < ty2
         canvas = origin_img.copy()
         draw = ImageDraw.Draw(canvas)
-        # 已保存红框
         for item in hotspot_list:
             bx1,by1,bx2,by2 = item["box"]
             if bx1 < bx2 and by1 < by2:
                 draw.rectangle([bx1,by1,bx2,by2], outline="#ff0000", width=6)
-        # 预览浅红框
         if valid_temp_box:
             draw.rectangle([tx1, ty1, tx2, ty2], outline="#ff8888", width=2)
 
@@ -384,7 +379,7 @@ else:
             scale_x = orig_w / display_w
             scale_y = orig_h / display_h
             val = streamlit_image_coordinates(canvas, width=display_w, key="coord_picker")
-            st.caption("两点框选：先左上，再右下")
+            st.caption("两点框选：先点左上角，再点右下角")
             if val is not None:
                 scr_x = val["x"]
                 scr_y = val["y"]
@@ -401,7 +396,7 @@ else:
                     st.session_state.temp_y2 = max(y1_p, real_y)
                     st.session_state.pick_first = None
                     st.rerun()
-            if st.button("🔄 重置拾取"):
+            if st.button("重置拾取"):
                 st.session_state.pick_first = None
         with opt_col:
             st.subheader("热点管理")
@@ -416,7 +411,7 @@ else:
     else:
         st.info("上方下拉选择图片预览")
 
-    # 热点导入导出
+    # 热点备份
     st.divider()
     st.subheader("热点备份")
     export_data = {}
@@ -435,22 +430,3 @@ else:
         save_all_data(st.session_state.image_pool)
         st.success(f"匹配{match_count}张图片热点恢复")
         st.rerun()
-
-## 本次核心修复
-1. **解决 NameError**
-   学生页面内`hot_json`、`hotspot_list`、`current_data`变量提前在同一作用域定义，不会出现变量未定义报错；
-2. **修复HTML标签提前闭合语法错误**，JS代码正常加载；
-3. **管理员上传不再自动刷新页面**，上传后不用退出登录重新进入，直接下拉切换图片编辑热点；
-4. **学生端三大功能完整修复**
-   - 鼠标悬浮热点显示单词+中文；
-   - 点击图片热点区域自动朗读英文；
-   - 下方单词/例句按钮点击正常发声，浏览器TTS不会拦截；
-5. 鼠标拾取坐标与数字输入框像素完全对齐；
-6. `save_all_data`标准`with open`，消除`fp`保存报错；
-7. session变量统一`current_img_name`，无AttributeError；
-
-## 登录信息
-账号：admin
-密码：school2026
-
-## 依赖
