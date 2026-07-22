@@ -265,51 +265,47 @@ else:
         st.session_state.admin_name = ""
         st.rerun()
 
-  with st.sidebar:
-    st.header("1. 批量上传图片")
-    st.info(f"当前图片总数：{len(img_name_list)} | 单次≤8张，单张≤8MB")
-    # 新增session标记，避免重复处理同一批文件
-    if "upload_processed" not in st.session_state:
-        st.session_state.upload_processed = ""
-    upload_imgs = st.file_uploader("支持jpg/png/jpeg，可多选", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="img_upload_key_fix")
-    if upload_imgs:
-        # 用文件名拼接作为标识，防止循环重复执行
-        file_key = ",".join([f.name for f in upload_imgs])
-        if file_key == st.session_state.upload_processed:
-            st.info("文件已处理，下拉框切换图片即可")
-        else:
-            if len(upload_imgs) > 8:
-                st.error("单次最多8张！")
+    with st.sidebar:
+        st.header("1. 批量上传图片")
+        st.info(f"当前图片总数：{len(img_name_list)} | 单次≤8张，单张≤8MB")
+        if "upload_processed" not in st.session_state:
+            st.session_state.upload_processed = ""
+        upload_imgs = st.file_uploader("支持jpg/png/jpeg，可多选", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="img_upload_key_fix")
+        if upload_imgs:
+            file_key = ",".join([f.name for f in upload_imgs])
+            if file_key == st.session_state.upload_processed:
+                st.info("文件已处理，下拉框切换图片即可")
             else:
-                progress_bar = st.progress(0)
-                total = len(upload_imgs)
-                success_count = 0
-                new_upload_name = ""
-                fail_list = []
-                for idx, file in enumerate(upload_imgs):
-                    progress_bar.progress((idx+1)/total, text=f"处理：{file.name}")
-                    img, msg = load_and_compress(file)
-                    if img is None:
-                        fail_list.append(msg)
-                        continue
-                    # 同名图片覆盖提示
-                    if file.name in st.session_state.image_pool:
-                        st.info(f"{file.name}：已更新图片，原有热点保留")
-                    else:
-                        st.session_state.image_pool[file.name] = {"img": img, "hotspots": []}
-                    success_count += 1
-                    new_upload_name = file.name
-                progress_bar.empty()
-                for err in fail_list:
-                    st.warning(err)
-                if success_count > 0:
-                    st.session_state.current_img_name = new_upload_name
-                    save_all_data(st.session_state.image_pool)
-                    st.session_state.upload_processed = file_key
-                    st.success(f"成功处理{success_count}张，请上方下拉框切换新图片查看")
+                if len(upload_imgs) > 8:
+                    st.error("单次最多8张！")
                 else:
-                    st.info("无图片处理")
-
+                    progress_bar = st.progress(0)
+                    total = len(upload_imgs)
+                    success_count = 0
+                    new_upload_name = ""
+                    fail_list = []
+                    for idx, file in enumerate(upload_imgs):
+                        progress_bar.progress((idx+1)/total, text=f"处理：{file.name}")
+                        img, msg = load_and_compress(file)
+                        if img is None:
+                            fail_list.append(msg)
+                            continue
+                        if file.name in st.session_state.image_pool:
+                            st.info(f"{file.name}：已更新图片，原有热点保留")
+                        else:
+                            st.session_state.image_pool[file.name] = {"img": img, "hotspots": []}
+                        success_count += 1
+                        new_upload_name = file.name
+                    progress_bar.empty()
+                    for err in fail_list:
+                        st.warning(err)
+                    if success_count > 0:
+                        st.session_state.current_img_name = new_upload_name
+                        save_all_data(st.session_state.image_pool)
+                        st.session_state.upload_processed = file_key
+                        st.success(f"成功处理{success_count}张，请上方下拉框切换新图片查看")
+                    else:
+                        st.info("无图片处理")
         st.divider()
         st.header("热点坐标设置")
         temp_x1 = st.session_state.temp_x1
