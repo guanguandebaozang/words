@@ -5,7 +5,7 @@ from io import BytesIO
 from PIL import Image
 import os
 
-# 持久化数据文件
+# 持久化数据文件（线下替换此文件更新场景）
 DATA_FILE = "data_backup.json"
 
 # 页面基础配置
@@ -31,12 +31,10 @@ def img_to_b64(pil_img):
     buf.close()
     return res
 
-# 生成内置测试示例数据（无json时自动加载）
+# 内置调试示例（无data_backup.json时自动加载）
 def get_demo_data():
-    # 创建一张简易白色测试图
     w, h = 800, 600
     demo_img = Image.new("RGB", (w, h), color=(240, 248, 255))
-    # 内置测试热点
     demo_hotspots = [
         {
             "box": [100, 100, 300, 300],
@@ -46,7 +44,7 @@ def get_demo_data():
             "sentence": "This is a book."
         },
         {
-            "box": [400, 200, 600, 400],
+            "box": [400, 200, 600],
             "word": "pen",
             "phonetic": "/pen/",
             "cn": "钢笔",
@@ -58,8 +56,9 @@ def get_demo_data():
             "img_b64": img_to_b64(demo_img),
             "hotspots": demo_hotspots
         }
+    }
 
-# 加载本地场景数据，无文件自动加载示例
+# 读取本地库内数据文件
 def load_scene_data():
     if not os.path.exists(DATA_FILE):
         return get_demo_data()
@@ -75,17 +74,17 @@ def load_scene_data():
             }
         return scene_pool
     except Exception as e:
-        st.warning(f"本地数据读取失败，自动加载示例：{str(e)}")
+        st.warning(f"数据文件读取失败，加载示例图调试：{str(e)}")
         return get_demo_data()
 
-# 初始化加载
+# 加载数据
 scene_pool = load_scene_data()
 
 # 页面标题
 st.title("沉浸式英语情景点读")
 st.divider()
 
-# 场景选择
+# 场景下拉选择
 img_name_list = list(scene_pool.keys())
 select_img = st.selectbox("选择学习场景", img_name_list)
 scene_info = scene_pool[select_img]
@@ -93,14 +92,14 @@ origin_img = scene_info["img"]
 hotspot_list = scene_info["hotspots"]
 orig_w, orig_h = origin_img.size
 
-# 图片转base64渲染页面热点层
+# 图片转为base64渲染热点层
 buf = BytesIO()
-origin_img.save(buf, format="JPEG", quality=80)
+origin.save(buf, format="JPEG", quality=80)
 img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 buf.close()
 hot_json = json.dumps(hotspots, ensure_ascii=False)
 
-# 前端朗读JS+悬浮热点
+# 前端朗读与悬浮热点HTML
 html_code = f"""
 <script>
 function speakWord(text) {{
@@ -147,7 +146,7 @@ window.onload = function(){{
 """
 st.components.v1.html(html_code, height=int(orig_h * 0.72))
 
-# 单词展示与朗读按钮
+# 词汇展示与朗读按钮
 if len(hotspot_list) == 0:
     st.info("该场景暂无标注词汇")
 else:
@@ -166,18 +165,6 @@ else:
     with b2:
         st.button("🔊朗读例句", on_click=lambda: st.markdown(f'<script>speakSentence("{s_text}")</script>', unsafe_allow_html=True))
 
-# =====================线下JSON上传更新模块=====================
+# 页面底部提示更新方式（仅文字说明，无上传控件）
 st.divider()
-st.subheader("【管理员专用】线下场景文件更新")
-st.info("使用管理端导出的data_backup.json上传，一键更新全部图片与单词热点；若无文件程序自动加载demo_test示例图调试")
-upload_json_file = st.file_uploader("上传data_backup.json", type="json")
-if upload_json_file is not None:
-    try:
-        # 读取上传的JSON内容
-        new_full_data = json.load(upload_json_file)
-        # 覆盖本地持久化文件
-        with open(DATA_FILE, "w", encoding="utf-8") as output_f:
-            json.dump(new_full_data, output_f, ensure_ascii=False, indent=2)
-        st.success("✅场景更新成功！刷新页面即可加载新内容")
-    except Exception as err:
-        st.error(f"文件上传失败，请检查JSON格式：{str(err)}")
+st.info("更新说明：线下生成data_backup.json，替换项目库内同名文件，重新部署即可更新全部场景。")
