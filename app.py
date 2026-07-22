@@ -157,6 +157,7 @@ if img_name_list:
     st.session_state.current_img_name = selected_img
 
 # ========== 学生页面（无红框，不影响单词点读） ==========
+# ========== 学生页面（无红框，修复朗读无声问题） ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
     st.info("仅浏览单词、浏览器语音朗读")
@@ -166,29 +167,45 @@ if st.session_state.view_mode == "visit":
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
         hotspot_list = current_data["hotspots"]
+        # 学生纯原图无红框
         st.image(origin_img, use_column_width=True, caption="情景")
         if len(hotspot_list) == 0:
             st.warning("暂无情景词汇")
         else:
             hot_idx = st.radio("选择物品学习", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
             word_info = hotspot_list[hot_idx]
+            w_text = word_info["word"]
+            s_text = word_info["sentence"]
             st.markdown(f"# {word_info['word']}")
             st.markdown(f"音标：/{word_info['phonetic']}/")
             st.markdown(f"中文释义：{word_info['cn']}")
             st.markdown(f"校园例句：{word_info['sentence']}")
-            speak_js = f"""
-            <script>
-            function readWord(){{let v=new SpeechSynthesisUtterance("{word_info['word']}");v.lang="en-US";speechSynthesis.speak(v);}}
-            function readSentence(){{let v=new SpeechSynthesisUtterance("{word_info['sentence']}");v.lang="en-US";speechSynthesis.speak(v);}}
-            </script>
-            """
-            st.components.v1.html(speak_js, height=0)
+
             b1,b2 = st.columns(2)
             with b1:
-                st.button("🔊 朗读单词", on_click=lambda: st.components.v1.html("<script>readWord()</script>", height=0))
+                st.button("🔊 朗读单词", on_click=lambda: st.markdown(
+                    f"""
+                    <script>
+                    speechSynthesis.cancel();
+                    let utt = new SpeechSynthesisUtterance("{w_text}");
+                    utt.lang = "en-US";
+                    utt.rate = 0.95;
+                    speechSynthesis.speak(utt);
+                    </script>
+                    """, unsafe_allow_html=True
+                ))
             with b2:
-                st.button("🔊 朗读例句", on_click=lambda: st.components.v1.html("<script>readSentence()</script>", height=0))
-
+                st.button("🔊 朗读例句", on_click=lambda: st.markdown(
+                    f"""
+                    <script>
+                    speechSynthesis.cancel();
+                    let utt = new SpeechSynthesisUtterance("{s_text}");
+                    utt.lang = "en-US";
+                    utt.rate = 0.95;
+                    speechSynthesis.speak(utt);
+                    </script>
+                    """, unsafe_allow_html=True
+                ))
 # ========== 管理员后台 ==========
 else:
     if not st.session_state.is_admin:
