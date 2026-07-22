@@ -70,7 +70,7 @@ def load_and_compress(file_obj):
             try:
                 raw_img = raw_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
             except AttributeError:
-                raw_img = raw_img.resize((new_w, Image.ANTIALIAS))
+                raw_img = raw_img.resize((new_w, new_h), Image.ANTIALIAS)
         return raw_img, "ok"
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
@@ -114,7 +114,7 @@ def load_all_data():
     except Exception:
         return {}
 
-# 会话初始化
+# 会话初始化（修复变量名统一 current_img_name）
 def init_session():
     if "image_pool" not in st.session_state:
         st.session_state.image_pool = load_all_data()
@@ -146,14 +146,14 @@ with col_switch1:
     page_choose = st.radio("页面入口", ["学生学习页", "管理员后台"])
 st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "admin"
 
-# 读取图片列表
+# 读取图片列表 + 修复变量名 current_img_name
 img_name_list = list(st.session_state.image_pool.keys())
-selected_img = st.session_state.current_img
+selected_img = st.session_state.current_img_name
 idx = 0
 if img_name_list:
     if selected_img in img_name_list:
         idx = img_name_list.index(selected_img)
-    selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张", img_name_list, index=idx)
+    selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张）", img_name_list, index=idx)
     st.session_state.current_img_name = selected_img
 
 # ========== 学生页面【修复：热点悬浮提示+点击发声+按钮朗读正常】 ==========
@@ -212,7 +212,7 @@ window.addEventListener('load', function(){{
         container.appendChild(div);
     }})
 }});
-</script>
+</div>
 <div id="scene-container" style="position:relative;width:100%;">
 <img id="scene-img" src="data:image/jpeg;base64,{img_b64}" style="width:100%;display:block;">
 </div>
@@ -299,7 +299,7 @@ else:
                 if success_count > 0:
                     st.session_state.current_img_name = new_upload_name
                     save_all_data(st.session_state.image_pool)
-                    # 【关键修复：上传成功不执行st.rerun，登录状态不丢失，不用重登】
+                    # 关键：上传不自动刷新，登录状态保留，不用重登
                     st.success(f"成功处理{success_count}张，请上方下拉切换新图片即可编辑热点")
                 else:
                     st.info("无图片处理")
@@ -383,16 +383,21 @@ else:
             display_h = display_w * orig_h / orig_w
             scale_x = orig_w / display_w
             scale_y = orig_h / display_h
-            val = streamlit_image_coordinates(canvas, width=display_w, key="coord_picker")
-            st.caption("📌 两点拾取：先点左上角 → 再点右下角")
+            val = streamlit_image_coordinates(
+                canvas,
+                width=display_w,
+                key="coord_picker"
+            )
+            st.caption("📌 两点拾取：先点左上角 → 再点右下角，坐标与输入框完全匹配")
             if val is not None:
                 scr_x = val["x"]
                 scr_y = val["y"]
                 real_x = round(scr_x * scale_x)
                 real_y = round(scr_y * scale_y)
+
                 if st.session_state.pick_first is None:
                     st.session_state.pick_first = (real_x, real_y)
-                    st.info(f"原图坐标({real_x}, {real_y})")
+                    st.info(f"原图坐标({real_x}, {real_y})，请点击右下角")
                 else:
                     x1_p, y1_p = st.session_state.pick_first
                     st.session_state.temp_x1 = min(x1_p, real_x)
