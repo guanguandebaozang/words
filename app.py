@@ -168,10 +168,9 @@ if st.session_state.view_mode == "visit":
         origin_img = current_data["img"]
         hotspot_list = current_data["hotspots"]
         orig_w, orig_h = origin_img.size
-
         img_b64 = img_to_b64(origin_img)
-        hot_json = json.dumps(hotspots, ensure_ascii=False)
-
+        # 修复：直接使用 hotspot_list，变量名统一
+        hot_json = json.dumps(hotspot_list, ensure_ascii=False)
         html_code = f"""
 <script>
 function speakWord(text) {{
@@ -217,7 +216,6 @@ window.onload = function(){{
 </div>
 """
         st.components.v1.html(html_code, height=int(orig_h * 0.72))
-
         if len(hotspot_list) == 0:
             st.warning("暂无标注单词热点")
         else:
@@ -229,13 +227,11 @@ window.onload = function(){{
             st.markdown(f"音标：/{word_info['phonetic']}/")
             st.markdown(f"中文释义：{word_info['cn']}")
             st.markdown(f"例句：{word_info['sentence']}")
-
             b1, b2 = st.columns(2)
             with b1:
                 st.button("朗读单词", on_click=lambda: st.markdown(f'<script>speakWord("{w_text}")</script>', unsafe_allow_html=True))
             with b2:
                 st.button("朗读例句", on_click=lambda: st.markdown(f'<script>speakSentence("{s_text}")</script>', unsafe_allow_html=True))
-
 # 管理员后台
 else:
     if not st.session_state.is_admin:
