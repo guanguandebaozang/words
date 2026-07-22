@@ -5,11 +5,13 @@ from io import BytesIO
 from PIL import Image
 import os
 
+# ====================== 固定路径：读取当前目录 data_backup.json ======================
 DATA_FILE = "data_backup.json"
-st.set_page_config(page_title="英语情景点读-学生端", layout="wide")
+st.set_page_config(page_title="英语点读学生端", layout="wide")
 
+# base64 转图片
 def b64_to_img(b64_str):
-    if not b64_str or not isinstance(b64_str, str):
+    if not b64_str:
         return None
     try:
         buf = BytesIO(base64.b64decode(b64_str))
@@ -19,85 +21,51 @@ def b64_to_img(b64_str):
     except Exception:
         return None
 
-def img_to_b64(pil_img):
-    buf = BytesIO()
-    pil_img.save(buf, format="JPEG", quality=80)
-    res = base64.b64encode(buf.getvalue()).decode("utf-8")
-    buf.close()
-    return res
-
-# 内置调试示例（无json自动启用）
-def get_demo_data():
-    w, h = 800, 600
-    demo_img = Image.new("RGB", (w, h), color=(240, 248, 255))
-    hotspots = [
-        {
-            "box": [100, 100, 300, 300],
-            "word": "book",
-            "phonetic": "/bʊk/",
-            "cn": "书本",
-            "sentence": "This is a book."
-        },
-        {
-            "box": [400, 200, 600, 400],
-            "word": "pen",
-            "phonetic": "/pen/",
-            "cn": "钢笔",
-            "sentence": "I have a pen."
-        }
-    ]
-    return {
-        "demo_test.jpg": {
-            "img_b64": img_to_b64(demo_img),
-            "hotspots": hotspots
-        }
-    }
-
-def load_scene_data():
-    demo = get_demo_data()
+# 加载本地JSON数据
+def load_all_data():
     if not os.path.exists(DATA_FILE):
-        return demo
+        return None
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            raw_json = json.load(f)
-        valid_pool = {}
-        for name, data in raw_json.items():
-            img = b64_to_img(data.get("img_b64", ""))
-            if img:
-                valid_pool[name] = {
-                    "img": img,
-                    "hotspots": data.get("hotspots", [])
-                }
-        if len(valid_pool) == 0:
-            return demo
-        return valid_pool
+            return json.load(f)
     except Exception:
-        return demo
+        return None
 
-scene_pool = load_scene_data()
+# ====================== 初始化 ======================
+data = load_all_data()
 
-# 存储当前选中热点（点击弹出卡片）
-if "active_hot" not in st.session_state:
-    st.session_state.active_hot = None
-
-st.title("沉浸式英语情景点读")
+st.title("📖 英语情景智能点读")
 st.divider()
 
-img_name_list = list(scene_pool.keys())
-select_img = st.selectbox("选择学习场景", img_name_list)
-scene_info = scene_pool[select_img]
-origin_img = scene_info["img"]
-hotspot_list = scene_info["hotspots"]
-orig_w, orig_h = origin_img.size
+# 无文件提示
+if data is None:
+    st.error("❌ 未找到 data_backup.json，请将文件与学生端脚本放在同一文件夹！")
+    st.stop()
 
+img_list = list(data.keys())
+if not img_list:
+    st.warning("暂无场景图片数据")
+    st.stop()
+
+# 场景选择
+select_scene = st.selectbox("请选择学习场景", img_list)
+scene_data = data[select_scene]
+img = b64_to_img(scene_data["img_b64"])
+hotspots = scene_data["hotspots"]
+
+if not img:
+    st.error("图片加载失败")
+    st.stop()
+
+orig_w, orig_h = img.size
 # 图片base64
 buf = BytesIO()
-origin_img.save(buf, format="JPEG", quality=80)
+img.save(buf, format="JPEG", quality=80)
 img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 buf.close()
-hot_json = json.dumps(hotspot_list, ensure_ascii=False)
+hot_json = json.dumps(hotspots, ensure_ascii=False)
 
-# ========== 前端JS实现全部交互需求 ==========
+# ========== 前端JS实现全部交互需求【修改卡片透明度】 ==========
 html_code = f"""
 <style>
     /* 右下角悬浮单词提示 */
@@ -122,17 +90,19 @@ html_code = f"""
         z-index:3000;
         display:none;
     }}
-    /* 单词卡片 */
+    /* 单词卡片【重点修改：半透明白色】 */
     .word-card {{
         position: fixed;
         left:50%;
         top:50%;
         transform:translate(-50%,-50%);
-        background:#ffffff;
+        background:rgba(255,255,255,0.85);
+        backdrop-filter: blur(6px);
         padding:32px;
         border-radius:12px;
         min-width:360px;
         text-align:center;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.15);
     }}
 </style>
 <div class="word-tip" id="tipBox"></div>
@@ -238,11 +208,11 @@ st.components.v1.html(html_code, height=int(orig_h * 0.78))
 
 st.divider()
 st.subheader("📚 本场景单词列表")
-if len(hotspot_list) == 0:
+if len(hotspots) == 0:
     st.info("该场景暂无标注词汇")
 else:
-    hot_idx = st.radio("选择词汇查看", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
-    word_info = hotspot_list[hot_idx]
+    hot_idx = st.radio("选择词汇查看", range(len(hotspots), format_func=lambda i: hotspots[i]["word"]))
+    word_info = hotspots[hot_idx]
     w_text = word_info["word"]
     s_text = word_info["sentence"]
 
