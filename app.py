@@ -5,11 +5,9 @@ from io import BytesIO
 from PIL import Image
 import os
 
-# ====================== 固定路径：读取当前目录 data_backup.json ======================
 DATA_FILE = "data_backup.json"
 st.set_page_config(page_title="英语点读学生端", layout="wide")
 
-# base64 转图片
 def b64_to_img(b64_str):
     if not b64_str:
         return None
@@ -21,7 +19,6 @@ def b64_to_img(b64_str):
     except Exception:
         return None
 
-# 加载本地JSON数据
 def load_all_data():
     if not os.path.exists(DATA_FILE):
         return None
@@ -31,13 +28,11 @@ def load_all_data():
     except Exception:
         return None
 
-# ====================== 初始化 ======================
 data = load_all_data()
 
 st.title("📖 英语情景智能点读")
 st.divider()
 
-# 无文件提示
 if data is None:
     st.error("❌ 未找到 data_backup.json，请将文件与学生端脚本放在同一文件夹！")
     st.stop()
@@ -47,7 +42,6 @@ if not img_list:
     st.warning("暂无场景图片数据")
     st.stop()
 
-# 场景选择
 select_scene = st.selectbox("请选择学习场景", img_list)
 scene_data = data[select_scene]
 img = b64_to_img(scene_data["img_b64"])
@@ -58,21 +52,16 @@ if not img:
     st.stop()
 
 orig_w, orig_h = img.size
-# 图片base64
 buf = BytesIO()
 img.save(buf, format="JPEG", quality=80)
 img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 buf.close()
 hot_json = json.dumps(hotspots, ensure_ascii=False)
 
-# ========== 前端JS实现全部交互需求【修改卡片透明度】 ==========
 html_code = f"""
 <style>
-    /* 右下角悬浮单词提示 */
     .word-tip {{
         position: fixed;
-        right: 24px;
-        bottom: 120px;
         background: rgba(0,0,0,0.75);
         color: #fff;
         padding: 8px 16px;
@@ -81,8 +70,8 @@ html_code = f"""
         z-index: 2000;
         display: none;
         pointer-events:none;
+        transform: translate(16px,16px);
     }}
-    /* 单词弹窗遮罩 */
     .modal-mask {{
         position: fixed;
         inset:0;
@@ -90,13 +79,12 @@ html_code = f"""
         z-index:3000;
         display:none;
     }}
-    /* 单词卡片【重点修改：半透明白色】 */
     .word-card {{
         position: fixed;
         left:50%;
         top:50%;
         transform:translate(-50%,-50%);
-        background:rgba(255,255,255,0.85);
+        background:rgba(255,255,255,0.55);
         backdrop-filter: blur(6px);
         padding:32px;
         border-radius:12px;
@@ -138,17 +126,28 @@ const readWordBtn = document.getElementById("readWordBtn");
 const closeModalBtn = document.getElementById("closeModalBtn");
 
 let currentHot = null;
+let voiceUS = null;
 
-// 朗读英文单词
+// 优先加载纯正美式发音
+function loadVoice(){{
+    const voices = speechSynthesis.getVoices();
+    // 优先 en-US 美式女声
+    voiceUS = voices.find(v => v.lang === "en-US" && v.name.toLowerCase().includes("female"));
+    if(!voiceUS) voiceUS = voices.find(v => v.lang === "en-US");
+}}
+speechSynthesis.onvoiceschanged = loadVoice;
+loadVoice();
+
 function speakWord(text){{
     speechSynthesis.cancel();
     let u = new SpeechSynthesisUtterance(text);
+    if(voiceUS) u.voice = voiceUS;
     u.lang = "en-US";
-    u.rate = 0.95;
+    u.rate = 0.90;
+    u.pitch = 1.0;
     speechSynthesis.speak(u);
 }}
 
-// 生成透明热点区域
 function buildHotAreas(){{
     const scaleX = imgEl.offsetWidth / {orig_w};
     const scaleY = imgEl.offsetHeight / {orig_h};
@@ -160,10 +159,9 @@ function buildHotAreas(){{
         div.style.top = (y1*scaleY)+'px';
         div.style.width = ((x2-x1)*scaleX)+'px';
         div.style.height = ((y2-y1)*scaleY)+'px';
-        div.style.background = 'transparent'; /* 完全透明，不显示方框 */
+        div.style.background = 'transparent';
         div.style.zIndex = 10;
 
-        // 鼠标悬浮：右下角显示单词小样
         div.onmouseover = ()=>{{
             tipBox.innerText = item.word;
             tipBox.style.display = "block";
@@ -172,7 +170,10 @@ function buildHotAreas(){{
         div.onmouseout = ()=>{{
             tipBox.style.display = "none";
         }}
-        // 点击热点：弹出单词卡片
+        div.onmousemove = (e)=>{{
+            tipBox.style.left = e.clientX + "px";
+            tipBox.style.top = e.clientY + "px";
+        }}
         div.onclick = ()=>{{
             currentHot = item;
             cardWord.innerText = item.word;
@@ -185,7 +186,6 @@ function buildHotAreas(){{
     }})
 }}
 
-// 关闭弹窗
 closeModalBtn.onclick = ()=>{{
     maskBox.style.display = "none";
 }}
@@ -198,7 +198,6 @@ readWordBtn.onclick = ()=>{{
 
 imgEl.onload = buildHotAreas;
 window.addEventListener('resize', ()=>{{
-    // 清空旧区域重新生成
     container.querySelectorAll('div[style*="z-index:10"]').forEach(d=>d.remove());
     setTimeout(buildHotAreas,100);
 }})
@@ -211,7 +210,11 @@ st.subheader("📚 本场景单词列表")
 if len(hotspots) == 0:
     st.info("该场景暂无标注词汇")
 else:
-    hot_idx = st.radio("选择词汇查看", range(len(hotspots), format_func=lambda i: hotspots[i]["word"]))
+    hot_idx = st.radio(
+        "选择词汇查看",
+        range(len(hotspots)),
+        format_func=lambda i: hotspots[i]["word"]
+    )
     word_info = hotspots[hot_idx]
     w_text = word_info["word"]
     s_text = word_info["sentence"]
@@ -221,20 +224,34 @@ else:
     st.markdown(f"中文释义：{word_info['cn']}")
     st.markdown(f"例句：{word_info['sentence']}")
 
-    # 列表朗读：只读【单词 + 例句】英文，不读中文
     read_js = f"""
     <script>
+    let listVoice = null;
+    function loadListVoice(){{
+        const vs = speechSynthesis.getVoices();
+        listVoice = vs.find(v => v.lang === "en-US" && v.name.toLowerCase().includes("female"));
+        if(!listVoice) listVoice = vs.find(v => v.lang === "en-US");
+    }}
+    speechSynthesis.onvoiceschanged = loadListVoice;
+    loadListVoice();
+
     function playAudio(){{
         speechSynthesis.cancel();
         let u1 = new SpeechSynthesisUtterance("{w_text}");
+        if(listVoice) u1.voice = listVoice;
         u1.lang="en-US";
-        u1.rate=0.95;
+        u1.rate=0.90;
+        u1.pitch=1.0;
         speechSynthesis.speak(u1);
         u1.onend = ()=>{{
-            let u2 = new SpeechSynthesisUtterance("{s_text}");
-            u2.lang="en-US";
-            u2.rate=0.9;
-            speechSynthesis.speak(u2);
+            setTimeout(()=>{{
+                let u2 = new SpeechSynthesisUtterance("{s_text}");
+                if(listVoice) u2.voice = listVoice;
+                u2.lang="en-US";
+                u2.rate=0.90;
+                u2.pitch=1.0;
+                speechSynthesis.speak(u2);
+            }},300);
         }}
     }}
     </script>
