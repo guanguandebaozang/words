@@ -16,7 +16,7 @@ st.set_page_config(page_title="🏫沉浸式情景点读英语", layout="wide", 
 
 # ========= 登录配置 账号admin 密码school2026 =========
 ADMIN_USER = "admin"
-ADMIN_HASH = "5cee8df435262631ed30289e56c6ccb661f1628b24e107533146894471d49de5"
+ADMIN_HASH = "136b43316a034960977810162f20453048272412252d4b48f819d353f040928e"
 try:
     ADMIN_USER = st.secrets["admin_user"]
     ADMIN_HASH = st.secrets["admin_hash"]
@@ -70,12 +70,12 @@ def load_and_compress(file_obj):
             try:
                 raw_img = raw_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
             except AttributeError:
-                raw_img = raw_img.resize((new_w, new_h), Image.ANTIALIAS)
+                raw_img = raw_img.resize((new_w, Image.ANTIALIAS))
         return raw_img, "ok"
     except Exception as e:
         return None, f"【失败】{file_obj.name} 格式损坏：{str(e)}"
 
-# 安全持久化，修复dump fp缺失报错
+# 安全持久化，修复dump fp报错
 def save_all_data(pool):
     try:
         dump_data = {}
@@ -148,31 +148,81 @@ st.session_state.view_mode = "visit" if page_choose == "学生学习页" else "a
 
 # 读取图片列表
 img_name_list = list(st.session_state.image_pool.keys())
-selected_img = st.session_state.current_img_name
+selected_img = st.session_state.current_img
 idx = 0
 if img_name_list:
     if selected_img in img_name_list:
         idx = img_name_list.index(selected_img)
-    selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张）", img_name_list, index=idx)
+    selected_img = st.selectbox(f"选择场景图片（共{len(img_name_list)}张", img_name_list, index=idx)
     st.session_state.current_img_name = selected_img
 
-# ========== 学生页面（无红框，不影响单词点读） ==========
-# ========== 学生页面（无红框，修复朗读无声问题） ==========
+# ========== 学生页面【修复：热点悬浮提示+点击发声+按钮朗读正常】 ==========
 if st.session_state.view_mode == "visit":
     st.subheader("📖 学生学习专区（游客无需登录）")
-    st.info("仅浏览单词、浏览器语音朗读")
+    st.info("鼠标悬停物品显示单词，点击区域朗读单词")
     if not img_name_list:
         st.warning("管理员尚未上传情景图片，请稍后再来！")
     else:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
+        orig_w, orig_h = origin_img.size
         hotspot_list = current_data["hotspots"]
-        # 学生纯原图无红框
-        st.image(origin_img, use_column_width=True, caption="情景")
+
+        # 转图片base64嵌入HTML
+        img_b64 = img_to_b64(origin_img)
+        hot_json = json.dumps(hotspots, ensure_ascii=False)
+
+        # 全局TTS脚本 + 带热点可点击层（hover提示、点击朗读）
+        html_code = f"""
+<script>
+let hotList = {hot_json};
+function speakWord(text) {{
+    speechSynthesis.cancel();
+    let u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-US";
+    u.rate = 0.95;
+    speechSynthesis.speak(u);
+}}
+function speakSentence(text) {{
+    speechSynthesis.cancel();
+    let u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-US";
+    u.rate = 0.9;
+    speechSynthesis.speak(u);
+}}
+window.addEventListener('load', function(){{
+    const container = document.getElementById('scene-container');
+    const imgEl = document.getElementById('scene-img');
+    const scaleX = imgEl.offsetWidth / {orig_w};
+    const scaleY = imgEl.offsetHeight / {orig_h};
+    hotList.forEach(item=>{{
+        let [x1,y1,x2,y2] = item.box;
+        const div = document.createElement('div');
+        div.style.position = 'absolute';
+        div.style.left = (x1*scaleX)+'px';
+        div.style.top = (y1*scaleY)+'px';
+        div.style.width = ((x2-x1)*scaleX)+'px';
+        div.style.height = ((y2-y1)*scaleY)+'px';
+        div.style.background = 'rgba(255,255,0,0.05)';
+        div.style.border = '1px solid rgba(255,200,0,0.4)';
+        div.style.cursor = 'pointer';
+        div.style.zIndex = 10;
+        div.title = item.word + " | " + item.cn;
+        div.onclick = ()=>speakWord(item.word);
+        container.appendChild(div);
+    }})
+}});
+</script>
+<div id="scene-container" style="position:relative;width:100%;">
+<img id="scene-img" src="data:image/jpeg;base64,{img_b64}" style="width:100%;display:block;">
+</div>
+"""
+        st.components.v1.html(html_code, height=int(orig_h * 0.72))
+
         if len(hotspot_list) == 0:
             st.warning("暂无情景词汇")
         else:
-            hot_idx = st.radio("选择物品学习", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
+            hot_idx = st.radio("选择物品手动朗读", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
             word_info = hotspot_list[hot_idx]
             w_text = word_info["word"]
             s_text = word_info["sentence"]
@@ -181,32 +231,13 @@ if st.session_state.view_mode == "visit":
             st.markdown(f"中文释义：{word_info['cn']}")
             st.markdown(f"校园例句：{word_info['sentence']}")
 
-            b1,b2 = st.columns(2)
+            b1, b2 = st.columns(2)
             with b1:
-                st.button("🔊 朗读单词", on_click=lambda: st.markdown(
-                    f"""
-                    <script>
-                    speechSynthesis.cancel();
-                    let utt = new SpeechSynthesisUtterance("{w_text}");
-                    utt.lang = "en-US";
-                    utt.rate = 0.95;
-                    speechSynthesis.speak(utt);
-                    </script>
-                    """, unsafe_allow_html=True
-                ))
+                st.button("🔊 朗读单词", on_click=lambda: st.markdown(f'<script>speakWord("{w_text}")</script>', unsafe_allow_html=True))
             with b2:
-                st.button("🔊 朗读例句", on_click=lambda: st.markdown(
-                    f"""
-                    <script>
-                    speechSynthesis.cancel();
-                    let utt = new SpeechSynthesisUtterance("{s_text}");
-                    utt.lang = "en-US";
-                    utt.rate = 0.95;
-                    speechSynthesis.speak(utt);
-                    </script>
-                    """, unsafe_allow_html=True
-                ))
-# ========== 管理员后台 ==========
+                st.button("🔊 朗读例句", on_click=lambda: st.markdown(f'<script>speakSentence("{s_text}")</script>', unsafe_allow_html=True))
+
+# ========== 管理员后台【修复：上传无需重登】 ==========
 else:
     if not st.session_state.is_admin:
         st.subheader("🔐 管理员登录验证")
@@ -254,7 +285,7 @@ else:
                     if img is None:
                         fail_list.append(msg)
                         continue
-                    # 同名仅替换图片，保留热点
+                    # 同名仅更新图片，保留原有热点
                     if file.name in st.session_state.image_pool:
                         st.session_state.image_pool[file.name]["img"] = img
                         st.info(f"{file.name}：已更新图片，原有热点保留")
@@ -268,7 +299,8 @@ else:
                 if success_count > 0:
                     st.session_state.current_img_name = new_upload_name
                     save_all_data(st.session_state.image_pool)
-                    st.success(f"成功处理{success_count}张，请下拉框手动切换图片查看（已移除自动刷新）")
+                    # 【关键修复：上传成功不执行st.rerun，登录状态不丢失，不用重登】
+                    st.success(f"成功处理{success_count}张，请上方下拉切换新图片即可编辑热点")
                 else:
                     st.info("无图片处理")
 
@@ -278,7 +310,7 @@ else:
         temp_y1 = st.session_state.temp_y1
         temp_x2 = st.session_state.temp_x2
         temp_y2 = st.session_state.temp_y2
-        img_w, img_h = 0, 0  # 修复：正确双变量赋值
+        img_w, img_h = 0, 0
         valid_temp_box = False
         if len(img_name_list) > 0:
             current_data = st.session_state.image_pool[selected_img]
@@ -326,7 +358,7 @@ else:
                 save_all_data(st.session_state.image_pool)
                 st.rerun()
 
-    # 管理员预览画布 + 双轴独立坐标换算（拾取/输入框完全对齐）
+    # 管理员预览画布 + 双轴独立坐标换算（拾取/输入完全对齐）
     if img_name_list and selected_img and selected_img in st.session_state.image_pool:
         current_data = st.session_state.image_pool[selected_img]
         origin_img = current_data["img"]
@@ -351,21 +383,16 @@ else:
             display_h = display_w * orig_h / orig_w
             scale_x = orig_w / display_w
             scale_y = orig_h / display_h
-            val = streamlit_image_coordinates(
-                canvas,
-                width=display_w,
-                key="coord_picker"
-            )
-            st.caption("📌 两点拾取：先点左上角 → 再点右下角，坐标与输入框完全匹配")
+            val = streamlit_image_coordinates(canvas, width=display_w, key="coord_picker")
+            st.caption("📌 两点拾取：先点左上角 → 再点右下角")
             if val is not None:
                 scr_x = val["x"]
                 scr_y = val["y"]
                 real_x = round(scr_x * scale_x)
                 real_y = round(scr_y * scale_y)
-
                 if st.session_state.pick_first is None:
                     st.session_state.pick_first = (real_x, real_y)
-                    st.info(f"原图坐标({real_x}, {real_y})，请点击右下角")
+                    st.info(f"原图坐标({real_x}, {real_y})")
                 else:
                     x1_p, y1_p = st.session_state.pick_first
                     st.session_state.temp_x1 = min(x1_p, real_x)
