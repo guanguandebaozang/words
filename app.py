@@ -5,13 +5,11 @@ from io import BytesIO
 from PIL import Image
 import os
 
-# 持久化数据文件（线下替换此文件更新场景）
+# 线下替换此文件更新场景
 DATA_FILE = "data_backup.json"
 
-# 页面基础配置
 st.set_page_config(page_title="英语情景点读-学生端", layout="wide")
 
-# base64转图片
 def b64_to_img(b64_str):
     if not b64_str:
         return None
@@ -23,7 +21,6 @@ def b64_to_img(b64_str):
     except Exception:
         return None
 
-# 图片转base64工具
 def img_to_b64(pil_img):
     buf = BytesIO()
     pil_img.save(buf, format="JPEG", quality=80)
@@ -31,7 +28,7 @@ def img_to_b64(pil_img):
     buf.close()
     return res
 
-# 内置调试示例（无data_backup.json时自动加载）
+# 修复完整box坐标，字典闭合正常
 def get_demo_data():
     w, h = 800, 600
     demo_img = Image.new("RGB", (w, h), color=(240, 248, 255))
@@ -44,7 +41,7 @@ def get_demo_data():
             "sentence": "This is a book."
         },
         {
-            "box": [400, 200, 600],
+            "box": [400, 200, 600, 400],
             "word": "pen",
             "phonetic": "/pen/",
             "cn": "钢笔",
@@ -58,7 +55,6 @@ def get_demo_data():
         }
     }
 
-# 读取本地库内数据文件
 def load_scene_data():
     if not os.path.exists(DATA_FILE):
         return get_demo_data()
@@ -67,40 +63,44 @@ def load_scene_data():
             raw_json = json.load(f)
         scene_pool = {}
         for img_name, data in raw_json.items():
-            img = b64_to_img(data["img_b64"])
+            img = b64_to_img(data.get("img_b64", ""))
             scene_pool[img_name] = {
                 "img": img,
-                "hotspots": data["hotspots"]
+                "hotspots": data.get("hotspots", [])
             }
         return scene_pool
     except Exception as e:
-        st.warning(f"数据文件读取失败，加载示例图调试：{str(e)}")
+        st.warning(f"数据读取失败，加载示例：{str(e)}")
         return get_demo_data()
 
-# 加载数据
 scene_pool = load_scene_data()
 
-# 页面标题
 st.title("沉浸式英语情景点读")
 st.divider()
 
-# 场景下拉选择
-img_name_list = list(scene_pool.keys())
-select_img = st.selectbox("选择学习场景", img_name_list)
-scene_info = scene_pool[select_img]
-origin_img = scene_info["img"]
-hotspot_list = scene_info["hotspots"]
-orig_w, orig_h = origin_img.size
+if not scene_pool:
+    st.warning("暂无场景数据，请运维替换 data_backup.json 重新部署")
+else:
+    img_name_list = list(scene_pool.keys())
+    select_img = st.selectbox("选择学习场景", img_name_list)
+    scene_info = scene_pool[select_img]
 
-# 图片转为base64渲染热点层
-buf = BytesIO()
-origin.save(buf, format="JPEG", quality=80)
-img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-buf.close()
-hot_json = json.dumps(hotspots, ensure_ascii=False)
+    # 安全获取，避免KeyError
+    origin_img = scene_info.get("img")
+    hotspot_list = scene_info.get("hotspots", [])
 
-# 前端朗读与悬浮热点HTML
-html_code = f"""
+    if origin_img is None:
+        st.error("当前图片数据损坏，请更新场景文件")
+    else:
+        orig_w, orig_h = origin_img.size
+
+        buf = BytesIO()
+        origin_img.save(buf, format="JPEG", quality=80)
+        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        buf.close()
+        hot_json = json.dumps(hotspots, ensure_ascii=False)
+
+        html_code = f"""
 <script>
 function speakWord(text) {{
     speechSynthesis.cancel();
@@ -144,27 +144,25 @@ window.onload = function(){{
 <img id="scene-img" src="data:image/jpeg;base64,{img_b64}" style="width:100%;display:block;">
 </div>
 """
-st.components.v1.html(html_code, height=int(orig_h * 0.72))
+        st.components.v1.html(html_code, height=int(orig_h * 0.72))
 
-# 词汇展示与朗读按钮
-if len(hotspot_list) == 0:
-    st.info("该场景暂无标注词汇")
-else:
-    hot_idx = st.radio("选择词汇查看", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
-    word_info = hotspot_list[hot_idx]
-    w_text = word_info["word"]
-    s_text = word_info["sentence"]
-    st.markdown(f"# {word_info['word']}")
-    st.markdown(f"音标：/{word_info['phonetic']}/")
-    st.markdown(f"中文释义：{word_info['cn']}")
-    st.markdown(f"例句：{word_info['sentence']}")
+        if len(hotspot_list) == 0:
+            st.info("该场景暂无标注词汇")
+        else:
+            hot_idx = st.radio("选择词汇查看", range(len(hotspot_list)), format_func=lambda i: hotspot_list[i]["word"])
+            word_info = hotspot_list[hot_idx]
+            w_text = word_info["word"]
+            s_text = word_info["sentence"]
+            st.markdown(f"# {word_info['word']}")
+            st.markdown(f"音标：/{word_info['phonetic']}/")
+            st.markdown(f"中文释义：{word_info['cn']}")
+            st.markdown(f"例句：{word_info['sentence']}")
 
-    b1, b2 = st.columns(2)
-    with b1:
-        st.button("🔊朗读单词", on_click=lambda: st.markdown(f'<script>speakWord("{w_text}")</script>', unsafe_allow_html=True))
-    with b2:
-        st.button("🔊朗读例句", on_click=lambda: st.markdown(f'<script>speakSentence("{s_text}")</script>', unsafe_allow_html=True))
+            b1, b2 = st.columns(2)
+            with b1:
+                st.button("🔊朗读单词", on_click=lambda: st.markdown(f'<script>speakWord("{w_text}")</script>', unsafe_allow_html=True))
+            with b2:
+                st.button("🔊朗读例句", on_click=lambda: st.markdown(f'<script>speakSentence("{s_text}")</script>', unsafe_allow_html=True))
 
-# 页面底部提示更新方式（仅文字说明，无上传控件）
 st.divider()
-st.info("更新说明：线下生成data_backup.json，替换项目库内同名文件，重新部署即可更新全部场景。")
+st.info("更新方式：线下生成 data_backup.json，替换仓库文件后重新部署应用。")
