@@ -33,7 +33,7 @@ def img_to_b64(pil_img):
         return None
     try:
         buf = BytesIO()
-        pil.save(buf, format="JPEG", quality=80)
+        pil_img.save(buf, format="JPEG", quality=80)
         res = base64.b64encode(buf.getvalue()).decode("utf-8")
         buf.close()
         return res
